@@ -53,7 +53,7 @@
 - `README-V2.md`、`ARCHITECTURE-V2.md`、`IMPLEMENTATION-STATUS.md`：产品范围、架构及实现状态记录。
 - `.env.example`：仅含变量名和安全占位示例；程序不会自动加载 `.env`。
 - `.gitignore`：忽略凭据、环境文件、运行数据、数据库/导出/备份、依赖和构建缓存，同时保留可移植发布脚本。
-- 已额外生成源码快照 `outputs/NSS-Solar-V2-Handoff-20261004-stocktake-ui.zip`，供跨账号传递；由本轮最新本地提交生成，不含运行数据、`.env`、密钥、数据库、Nginx 主机配置或临时管理员凭据。旧压缩包保留作历史版本。
+- 已额外生成源码快照 `outputs/NSS-Solar-V2-Handoff-20261004-zero-qty.zip`，供跨账号传递；由本轮最新本地提交生成，不含运行数据、`.env`、密钥、数据库、Nginx 主机配置或临时管理员凭据。旧压缩包保留作历史版本。
 
 ### 架构、技术栈和设计决定
 
@@ -106,14 +106,14 @@ npm start
 | Shell 脚本语法 | 成功 | `bash -n` 检查 `deploy/deploy.sh`、`deploy/deploy-v2.sh`、`deploy/backup.sh`。 |
 | JSON 配置格式 | 成功 | `package.json`、`package-lock.json`、`public/manifest.webmanifest` 均可解析。 |
 | `.gitignore` 规则 | 成功 | 在临时 Git 验证目录确认 `.env`、本地数据、数据库、私钥、凭据和机器 Nginx 配置被忽略；`.env.example` 和安全部署脚本未被忽略。 |
-| 自动化测试 | 成功 | 盘点界面修正后，使用临时 `SP_DATA_DIR` 运行 `node --test --test-concurrency=1 test/*.test.js`：30 个测试文件通过、0 失败。原有 28 个文件及新增 V2 整改 API、PWA 缓存测试均参与。旧测试前提按现行账号创建、12 位密码、强制改密和区域规则更新，未跳过或删除失败用例。完整日志在本机 `/private/tmp/nss-v2-regression-20261004-ui.log`（不进仓库）。 |
+| 自动化测试 | 成功 | 盘点界面和零数量导入修正后，使用临时 `SP_DATA_DIR` 运行 `node --test --test-concurrency=1 test/*.test.js`：30 个测试文件通过、0 失败。原有 28 个文件及新增 V2 整改 API、PWA 缓存测试均参与。旧测试前提按现行账号创建、12 位密码、强制改密和区域规则更新，未跳过或删除失败用例。完整日志在本机 `/private/tmp/nss-v2-regression-20261004-zero-qty.log`（不进仓库）。 |
 | 流程与权限回归测试 | 成功 | 运行 `node --test --test-concurrency=1 test/control-center.test.js test/rbac.test.js`：7 项流程测试及 138 项权限断言通过；旧版写死的权限数量断言已改为检查实际数据范围，不放宽权限。 |
 | 整改多账号 API 闭环 | 成功 | `node --test test/v2-remediation-api.test.js`：1 项通过；使用临时数据目录与本机随机端口，覆盖批准后指派、换人、证据轮次和复查关闭。浏览器界面尚未人工验收。 |
 | PWA 缓存隔离 | 成功（模拟） | `test/pwa-shell.test.js` 验证离线带版本参数静态资源、离线导航回退、业务 API 不缓存、升级保留无关缓存。真实手机安装和断网操作尚未人工验收。 |
 | 格式检查/静态 lint | 跳过 | 项目没有配置格式化器、lint 工具或对应 npm script；本次以语法检查代替，不宣称格式检查通过。 |
 | 前端构建 | 不适用 | 当前前端为静态 JS/CSS/HTML，没有构建脚本或 bundler。 |
 | 本地依赖安装 | 成功（替代方式） | npm 不在 PATH；pnpm 联网安装成功，且未修改 npm 锁文件。可执行正式验证：在有 npm 的环境运行 `npm ci`，再重跑测试命令。 |
-| 本地浏览器盘点 XLSX 验收 | 局部成功 | 在隔离数据目录和本机端口打开管理页，确认默认盘点申请显示导入区；切换到整改时隐藏，切回盘点时恢复。导入临时生成的 XLSX 后显示 1 行商品，并计算 9−10＝−1。没有向服务器提交此申请。 |
+| 本地浏览器盘点 XLSX 验收 | 局部成功 | 在隔离数据目录和本机端口打开管理页，确认默认盘点申请显示导入区；切换到整改时隐藏，切回盘点时恢复。导入临时生成的 XLSX 后显示 1 行商品，并计算 9−10＝−1；另一个数值为 0 的 XLSX 保留实盘 0，计算 0−10＝−10。没有向服务器提交这些申请。 |
 | 生产部署/完整浏览器人工验收 | 未执行 | 本次未访问服务器。实际岗位、双语全页面、完整流程及真实手机离线体验仍需后续核对。 |
 
 `scripts/acceptance_test.cjs` 需要一个本地隔离服务先启动，不能作为无需环境准备的独立测试。不要在测试时将 `SP_DATA_DIR` 指向生产目录。

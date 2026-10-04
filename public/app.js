@@ -498,7 +498,7 @@ function parseStocktakeTable(table) {
   const rows = [];
   for (const cells of table.slice(1)) {
     if (rows.length >= 2000) throw new Error(ccText('A stocktake can contain up to 2,000 lines', '每张盘点单最多导入 2,000 行'));
-    const get = field => columns[field] >= 0 ? String(cells[columns[field]] || '').trim() : '';
+    const get = field => columns[field] >= 0 ? String(cells[columns[field]] ?? '').trim() : '';
     const row = { itemCode: get('itemCode'), itemName: get('itemName'), location: get('location'), systemQuantity: get('systemQuantity'), countedQuantity: get('countedQuantity'), recountedQuantity: get('recountedQuantity'), varianceReason: get('varianceReason'), remark: get('remark') };
     if (!row.itemCode && !row.countedQuantity && !row.itemName) continue;
     if (!row.itemCode || row.countedQuantity === '') throw new Error(ccText('Each line needs an item code and counted quantity', '每行都必须填写商品编码和实盘数量'));
@@ -617,7 +617,7 @@ function createStocktakeEditor(container, initialRows = []) {
     const button = event.target.closest('button'); if (!button) return;
     if (button.hasAttribute('data-stocktake-xlsx-template')) downloadStocktakeXlsx();
     else if (button.hasAttribute('data-stocktake-template')) downloadStocktakeCsv([], 'NSS-Solar-stocktake-template.csv');
-    else if (button.hasAttribute('data-stocktake-add')) { if (rows.length >= 2000) { setError(ccText('A stocktake can contain up to 2,000 lines.', '每张盘点单最多 2,000 行。')); return; } rows.splice((page + 1) * pageSize, 0, { itemCode: '', itemName: '', location: '', systemQuantity: '', countedQuantity: '', recountedQuantity: '', varianceReason: '', remark: '' }); page = Math.floor((rows.length - 1) / pageSize); render(); }
+    else if (button.hasAttribute('data-stocktake-add')) { if (rows.length >= 2000) { setError(ccText('A stocktake can contain up to 2,000 lines.', '每张盘点单最多 2,000 行。')); return; } const insertAt = Math.min((page + 1) * pageSize, rows.length); rows.splice(insertAt, 0, { itemCode: '', itemName: '', location: '', systemQuantity: '', countedQuantity: '', recountedQuantity: '', varianceReason: '', remark: '' }); page = Math.floor(insertAt / pageSize); render(); }
     else if (button.hasAttribute('data-stocktake-remove')) { rows.splice(Number(button.dataset.stocktakeRemove), 1); render(); }
     else if (button.hasAttribute('data-stocktake-prev')) { page = Math.max(0, page - 1); render(); }
     else if (button.hasAttribute('data-stocktake-next')) { page = Math.min(Math.ceil(rows.length / pageSize) - 1, page + 1); render(); }

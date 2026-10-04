@@ -6,8 +6,9 @@
 
 - 项目快照已保存到本地 Git `main`，基础提交信息为 `chore: save NSS Solar V2 handoff snapshot`，后续本地功能和验证修正继续提交；远程 `origin` 指向用户提供的私有仓库 `https://github.com/H782854696-a11y/nss-solar-points-web.git`。
 - 当前执行环境尚不能核实 GitHub 推送：`git ls-remote` 因本机 HTTPS 凭据不可用而失败，`main` 也未记录 upstream。用户已表示在本机提交；接手时应在有授权的终端核对 `origin/main`，禁止强推。
-- JavaScript、Shell 和 JSON 语法检查通过。本机没有 npm，但获得网络权限后使用 pnpm 安装了忽略版本控制的 `node_modules/`，未更改 `package-lock.json`。30 个测试文件在盘点界面修正后再次全部通过（0 失败，日志 `/private/tmp/nss-v2-regression-20261004-ui.log`）。此前 6 个旧测试文件按现行账号创建、12 位密码、强制改密和门店区域要求修正测试前提，保留原有权限及安全断言；未降低现有应用规则。正式 `npm ci` 安装仍待执行。
+- JavaScript、Shell 和 JSON 语法检查通过。本机没有 npm，但获得网络权限后使用 pnpm 安装了忽略版本控制的 `node_modules/`，未更改 `package-lock.json`。30 个测试文件在盘点界面及零数量导入修正后再次全部通过（0 失败，日志 `/private/tmp/nss-v2-regression-20261004-zero-qty.log`）。此前 6 个旧测试文件按现行账号创建、12 位密码、强制改密和门店区域要求修正测试前提，保留原有权限及安全断言；未降低现有应用规则。正式 `npm ci` 安装仍待执行。
 - 本地浏览器已核对盘点申请默认显示 Excel/CSV 导入区，切换到门店整改时隐藏、切回盘点时恢复；导入临时 XLSX 后显示 1 条商品明细并算出差异 -1。其他角色的浏览器操作、真实手机安装和离线验收尚未完成。
+- 另用数值为 0 的 XLSX 实盘数量验证了导入结果：页面保留 0，并将 10 的账面数量计算为差异 -10；同时修正分页时“添加一行”跳转到错误页的定位。
 - 交接细节和逐项下一步见 `HANDOFF.md`。上述版本控制和测试准备未部署到生产，也未接触会员积分生产数据。
 - `test/control-center.test.js` 与 `test/rbac.test.js` 在本地共同运行通过（7 项流程测试及 138 项权限断言）；`test/v2-remediation-api.test.js` 的隔离多账号 API 验收通过，覆盖批准后指派、换人后旧证据失效、新负责人上传、提交复查及关闭。完整浏览器回归仍未完成。
 
