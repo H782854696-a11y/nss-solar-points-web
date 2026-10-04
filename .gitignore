@@ -1,0 +1,57 @@
+# Dependencies and generated build/test output
+node_modules/
+.cache/
+coverage/
+dist/
+build/
+playwright-report/
+test-results/
+*.tsbuildinfo
+
+# Environment files and credentials
+.env
+.env.*
+!.env.example
+INITIAL_ADMIN_CREDENTIALS.txt
+*credentials*.txt
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+secrets/
+
+# Operating system files and local snapshots
+.DS_Store
+_ui_refactor_v1_postrefactor/
+
+# Runtime data, databases, exports, and backups
+data/
+.local-data/
+logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.db-*
+*.dump
+*.sql
+*.bak
+*.backup
+backups/
+exports/
+database-export*.json
+*-db-export.json
+*-export.json
+*_export.json
+
+# Release archives
+*.zip
+*.tar
+*.tar.gz
+
+# Machine-specific configuration; portable deployment helpers remain trackable
+deploy/nginx.conf
+deploy/*.local.*

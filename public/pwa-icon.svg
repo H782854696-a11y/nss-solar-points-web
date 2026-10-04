@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#15803d"/>
+  <circle cx="256" cy="205" r="76" fill="#fbbf24"/>
+  <g stroke="#fbbf24" stroke-width="20" stroke-linecap="round">
+    <path d="M256 74v-28M256 364v-28M125 205H97M415 205h-28M163 112l-20-20M369 318l-20-20M349 112l20-20M143 318l20-20"/>
+  </g>
+  <path d="M94 325h324v105H94z" rx="26" fill="#fff"/>
+  <text x="256" y="397" text-anchor="middle" font-family="Arial,sans-serif" font-size="60" font-weight="700" fill="#15803d">NSS</text>
+</svg>

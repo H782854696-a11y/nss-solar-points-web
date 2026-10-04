@@ -1,0 +1,16 @@
+{
+  "name": "solarpoints-app",
+  "version": "1.0.0",
+  "description": "SolarPoints 会员积分系统 - 多门店实时同步",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.7",
+    "express": "^4.22.3",
+    "nanoid": "^3.3.19"
+  }
+}
