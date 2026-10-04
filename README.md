@@ -28,7 +28,7 @@
 npm ci
 ```
 
-如果依赖下载受网络限制，先配置可用的 npm 镜像/网络或使用已缓存的锁文件依赖；不要删除或重写 `package-lock.json` 来绕过安装问题。
+如果依赖下载受网络限制，先配置可用的 npm 镜像/网络或使用已缓存的锁文件依赖；不要删除或重写 `package-lock.json` 来绕过安装问题。本次本机没有 npm，曾用 pnpm 的 `--no-lockfile --ignore-scripts` 模式装入被忽略的 `node_modules/` 以运行回归测试；没有修改 npm 锁文件。正式环境仍以 `npm ci` 为准。
 
 ## 本地配置与启动
 
@@ -55,7 +55,7 @@ Windows PowerShell 可直接设置环境变量后运行 `npm start`。不要把 
 node --check server.js
 node --check public/app.js
 node --check public/service-worker.js
-node --test test/*.test.js
+node --test --test-concurrency=1 test/*.test.js
 ```
 
 `scripts/acceptance_test.cjs` 是需连接本地隔离服务的验收脚本，不是独立测试。先用临时 `SP_DATA_DIR` 和非生产端口启动本地服务，再通过 `BASE=http://localhost:<端口> node scripts/acceptance_test.cjs` 执行。完整的本次检查结果和无法运行项记录在 [HANDOFF.md](HANDOFF.md)。
