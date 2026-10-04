@@ -2,7 +2,7 @@
 
 交接日期：2026-10-04（Asia/Manila）  
 项目目录：`work/source-review/`  
-交接状态：本地源码与文档已整理并提交到本地 `main`；`origin` 已指向用户提供的私有 GitHub 仓库；推送因本机 HTTPS 凭据不可用且当前环境无法解析 `github.com` 而暂停；本次未访问或修改生产服务器。
+交接状态：本地源码与文档已整理并提交到本地 `main`；`origin` 已指向用户提供的私有 GitHub 仓库；推送因本机 GitHub HTTPS 凭据不可用而暂停；本次未访问或修改生产服务器。
 
 ## 1. 目标与范围
 
@@ -14,7 +14,7 @@
 
 隔离源码副本已有 V2 基础实现和进一步收敛后的本地功能。当前架构与实现范围记录在 `README-V2.md`、`ARCHITECTURE-V2.md`、`IMPLEMENTATION-STATUS.md`。本次补齐根目录 README、环境变量样例、Git 忽略规则和本交接文件，并收紧发布脚本，避免内置服务器 IP。
 
-当前工作区已初始化 Git，使用 `main` 分支并设置用户提供的 `origin`。项目快照已在本地提交，但 HTTPS 推送因 Git 无法读取 GitHub 用户名而未完成；随后确认当前环境还无法解析 `github.com`。本机 pnpm 离线安装也因缓存缺少 `bcryptjs` 元数据而停止，未安装依赖或改变锁文件。之前测试命令有 7 个测试文件通过、14 个测试文件因项目依赖缺失而未能初始化；这不等同于完整验收。生产部署状态未在本次重新核验。
+当前工作区已初始化 Git，使用 `main` 分支并设置用户提供的 `origin`。项目快照已在本地提交，但 HTTPS 推送因 Git 无法读取 GitHub 用户名而未完成。首次检查曾无法解析 `github.com`；获得当前任务的网络权限后已可连接，但仍缺少本机认证。本机 pnpm 离线安装也因缓存缺少 `bcryptjs` 元数据而停止，未安装依赖或改变锁文件。之前测试命令有 7 个测试文件通过、14 个测试文件因项目依赖缺失而未能初始化；这不等同于完整验收。生产部署状态未在本次重新核验。
 
 ### 已明确排除或尚未确认的范围
 
@@ -38,7 +38,7 @@
 - 审计：操作记录可按关键词和日期筛选并分页；附件下载受权限控制。
 - PWA：可安装页面外壳并缓存静态资源，业务 API 仍须在线。
 - 旧会员积分业务保留独立；中控集合不应混入会员余额或积分流水。
-- 新增 `test/control-center.test.js`，用 Node 内置测试器覆盖有效流程白名单、旧流程拒绝、盘点行差异/重复/行数校验、真实日期校验、外部单据编号，以及整改复查人与申请人/负责人分离等关键规则。
+- `test/control-center.test.js` 用 Node 内置测试器覆盖有效流程白名单、旧流程拒绝、盘点行差异/重复/行数校验、真实日期校验、外部单据编号、整改复查人与申请人/负责人分离，以及受指派员工的本人执行权限。整改可在批准后指派或更换负责人；更换时已有本轮前后证据则开启新轮次。
 
 ### 主要文件和目录
 
@@ -66,10 +66,10 @@
 
 - 仓库 URL：`https://github.com/H782854696-a11y/nss-solar-points-web.git`（用户提供的私有仓库）。
 - 当前分支：`main`；`origin` 已配置为上述 URL。
-- 最新 commit：本地已有用户指定提交 `chore: save NSS Solar V2 handoff snapshot`；完整 SHA 可用 `git rev-parse HEAD` 查询。
-- 推送是否成功：否。执行 `git push -u origin main` 时，HTTPS 凭据不可用，Git 返回 `fatal: could not read Username for 'https://github.com': Operation not permitted`。随后读取远程分支时又遇到 `Could not resolve host: github.com`。未发生远端写入。
+- 最新 commit：在用户指定的 `chore: save NSS Solar V2 handoff snapshot` 快照之后，另有流程权限断言、PWA 缓存和交接记录修正提交；完整 SHA 与提交信息可用 `git log -1 --format='%H %s'` 查询。
+- 推送是否成功：否。最新执行 `git push -u origin main` 时，网络已能连接 GitHub，但 HTTPS 凭据不可用，Git 返回 `fatal: could not read Username for 'https://github.com': Device not configured`。未发生远端写入。
 - 未提交/未跟踪文件：本地提交后工作区干净；本地快照提交包含 78 个项目文件。`.env.example` 是安全占位样例；敏感路径扫描及私钥/AWS/GitHub token 常见模式扫描未发现命中。
-- 本轮明确新增/修改：新建 `README.md`、`.env.example`、`HANDOFF.md`；更新 `.gitignore`；修改 `deploy/deploy-v2.sh` 使 SSH 主机必须显式传入。
+- 初始交接快照新增 `README.md`、`.env.example`、`HANDOFF.md`，更新 `.gitignore`，并使 `deploy/deploy-v2.sh` 的 SSH 主机必须显式传入。后续本地修正了整改负责人权限与指派入口、过时的 RBAC 数量断言，并更新 PWA 缓存版本及交接记录；仍未推送或发布生产。
 - 源码进入本地 Git 前原本没有 Git 基线，因此这是项目快照根提交，不能据此区分更早代码修改的时间或作者。
 
 后续需由用户在本机完成 GitHub 登录/授权（例如使用本机 GitHub CLI 或系统凭据管理器），然后重新执行 `git push -u origin main`。不要在聊天中发送 access token、SSH 私钥或管理员密码；不要重置、强推或改动仓库权限。
@@ -106,7 +106,7 @@ npm start
 | JSON 配置格式 | 成功 | `package.json`、`package-lock.json`、`public/manifest.webmanifest` 均可解析。 |
 | `.gitignore` 规则 | 成功 | 在临时 Git 验证目录确认 `.env`、本地数据、数据库、私钥、凭据和机器 Nginx 配置被忽略；`.env.example` 和安全部署脚本未被忽略。 |
 | 自动化测试 | 部分失败/未完成 | 运行 `node --test --test-concurrency=1 test/*.test.js`：7 个测试文件通过、14 个测试文件失败。失败发生在依赖初始化阶段；例如找不到项目本地 `node_modules/bcryptjs`。缺少项目依赖，不能据此判断业务断言失败或通过。 |
-| 流程边界回归测试 | 成功 | 单独运行 `node --test test/control-center.test.js`：6 项通过，覆盖仅允许盘点/整改、拒绝六类旧流程、盘点差异与输入限制、日期、外部单据编号和整改复查独立性。 |
+| 流程与权限回归测试 | 成功 | 运行 `node --test --test-concurrency=1 test/control-center.test.js test/rbac.test.js`：7 项流程测试及 138 项权限断言通过；旧版写死的权限数量断言已改为检查实际数据范围，不放宽权限。 |
 | 格式检查/静态 lint | 跳过 | 项目没有配置格式化器、lint 工具或对应 npm script；本次以语法检查代替，不宣称格式检查通过。 |
 | 前端构建 | 不适用 | 当前前端为静态 JS/CSS/HTML，没有构建脚本或 bundler。 |
 | 完整依赖安装 | 失败/未完成 | npm 不在 PATH，pnpm 可用但离线缓存缺少 `bcryptjs` 元数据；尝试的离线安装未安装依赖，也未修改锁文件。可执行替代：在有 npm 和可用依赖源的环境运行 `npm ci`，再重跑测试命令。 |
@@ -119,7 +119,7 @@ npm start
 ### P0：完成本机 GitHub 认证并推送现有提交
 
 - **目的：** 将已经审阅并提交的项目快照上传到用户指定的私有仓库。
-- **涉及文件：** 本地提交中的 77 个项目文件；`origin` 已设置为目标仓库。
+- **涉及文件：** 本地提交中的 78 个项目文件；`origin` 已设置为目标仓库。
 - **推荐操作：** 用户先在本机 GitHub CLI/凭据管理器完成登录授权，再重试 `git push -u origin main`；推送前确认当前 remote 和分支仍为指定目标。
 - **验收标准：** `origin/main` 指向当前本地 `HEAD`；本地 `git status --short --branch` 干净且显示跟踪 `origin/main`。
 - **风险/注意：** 本机 HTTPS 认证目前不可用。不要在聊天中粘贴任何凭据；不强推、不删除分支、不改仓库权限。
@@ -160,7 +160,7 @@ npm start
 
 ### 必须解决
 
-- **GitHub 推送受阻：** 本地 `main` 已提交，`origin` 已设置；当前 HTTPS 凭据不可用，且当前执行环境无法解析 `github.com`。需本机完成 GitHub 登录/授权，并确保运行环境网络可解析 GitHub 后再推送。
+- **GitHub 推送受阻：** 本地 `main` 已提交，`origin` 已设置；当前网络权限下已能连接 GitHub，但 HTTPS 凭据不可用。需本机完成 GitHub 登录/授权后再推送。
 - **完整测试未完成：** 缺少 `npm` 和项目本地依赖；pnpm 离线缓存也缺少必要的 bcryptjs 包元数据，测试中 14 个文件无法初始化。需要在依赖可安装的环境运行 `npm ci` 并重测。
 - **生产状态未经本轮复核：** 历史记录称 V2 使用 `/opt/solarpoints-v2/`，但当前服务进程、代码版本、备份和域名解析没有本轮确认。
 - **正式验收决策待办：** 各岗位的审批路径、流程权限范围、SLA、整改时限和菲律宾/中国账号实际矩阵需由业务方核对。

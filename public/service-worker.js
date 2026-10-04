@@ -1,4 +1,4 @@
-const CACHE = 'nss-control-shell-v10';
+const CACHE = 'nss-control-shell-v11';
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/xlsx.full.min.js', '/i18n.js', '/manifest.webmanifest', '/logo-brand.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
