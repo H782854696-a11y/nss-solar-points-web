@@ -692,7 +692,7 @@
     'accounts.resetPwBody': ['Set a temporary password for {username} ({name}). The account is signed out immediately and must change this password after signing in.', '为 {username}（{name}）设置临时密码。重置后该账号会被立即登出，下次登录后必须更改此密码。'],
     'accounts.resetPwLabel': ['New password (at least 12 characters)', '新密码（至少 12 位）'],
     'accounts.resetPwGenerate': ['Generate', '随机生成'],
-    'accounts.resetPwNeed6': ['New password must be at least 12 characters', '新密码至少 12 位'],
+    'accounts.resetPwNeed12': ['New password must be at least 12 characters', '新密码至少 12 位'],
     'accounts.resetPwDone': ['Password reset', '密码已重置'],
     'accounts.resetPwDoneBody': ['Temporary password for {username} — copy it now. They must change it after signing in:', '{username} 的临时密码 —— 请现在复制。对方登录后必须修改：'],
     'accounts.resetPwCopy': ['Copy', '复制'],

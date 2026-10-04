@@ -3673,7 +3673,7 @@ function resetPasswordDialog(account) {
     root.addEventListener('click', e => { if (e.target === root) finish(false); });
     $('#rpOk', root).addEventListener('click', async () => {
       const pw = input.value || '';
-      if (pw.length < 12) { err.textContent = ccText('Password must be at least 12 characters', '密码至少需要 12 位'); return; }
+      if (pw.length < 12) { err.textContent = t('accounts.resetPwNeed12'); return; }
       try {
         await POST('/api/users/' + encodeURIComponent(account.id) + '/reset-password', { newPassword: pw });
         finish(true);

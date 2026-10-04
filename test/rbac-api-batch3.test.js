@@ -44,6 +44,10 @@ function seed() {
     { id: 'SB', name: 'B区一号店', regionId: 'R-B', city: '', address: '', managerId: null, managerName: '待分配', phone: '', createdAt: now() },
     { id: 'SC', name: 'A区二号店', regionId: 'R-A', city: '', address: '', managerId: null, managerName: '待分配', phone: '', createdAt: now() },
   ]);
+  store.writeCollection('regions', [
+    { id: 'R-A', code: 'A', name: 'A 区', countryCode: 'PH', active: true },
+    { id: 'R-B', code: 'B', name: 'B 区', countryCode: 'PH', active: true },
+  ]);
   const mkUser = (id, username, pw, name, role, extra) => Object.assign({
     id, username, password: bcrypt.hashSync(pw, 10), name, role,
     storeId: null, phone: '', createdAt: now(), disabled: false,
@@ -93,7 +97,7 @@ async function login(u, pw) {
   return r.status;
 }
 /** 可复用的新店长请求体 */
-const mgrBody = (tag) => ({ username: 'mgr_' + tag, name: '新店长' + tag, password: 'Pass#12345' });
+const mgrBody = (tag) => ({ username: 'mgr_' + tag, name: '新店长' + tag, password: 'LocalOnlyPass#12345' });
 
 (async () => {
   seed();
@@ -205,15 +209,15 @@ const mgrBody = (tag) => ({ username: 'mgr_' + tag, name: '新店长' + tag, pas
   console.log('\n【无 staff.* 权限的角色】');
   ok('store_manager(SA) 有 staff.assign（矩阵授予）', true);
   r = await req('POST', '/api/stores/SA/managers', mgrBody('mgrOwn'));
-  ok('店长给自己门店分配店长 → 200（有 staff.assign 且在范围内）', r.status === 200, r.data);
-  // 说明：该操作会停用原店长（即自己）—— 业务语义存疑，已在报告中提请确认
+  ok('非现任店长仍可在本店任命，且自身不会因此停用',
+    r.status === 200 && (store.readCollection('users') || []).find(x => x.username === 't_mgrA')?.disabled !== true, r.data);
 
   // ─────────── admin / manager 兼容 ───────────
   console.log('\n【admin / manager 兼容】');
   ok('admin 登录', await login('t_admin', 'Admin#123') === 200);
   r = await req('GET', '/api/stores');
   ok('admin 仍可看全部门店', r.status === 200 && r.data.items.length === 3);
-  r = await req('POST', '/api/stores', { name: '管理员的店' });
+  r = await req('POST', '/api/stores', { name: '管理员的店', regionId: 'R-A' });
   ok('admin 仍可创建门店', r.status === 200, r.data);
   const newStoreId = r.data && r.data.store && r.data.store.id;
   r = await req('PUT', '/api/stores/' + newStoreId, { city: 'AdminCity' });

@@ -4,11 +4,11 @@
 // 背景：密码是 bcrypt 单向哈希，旧的**查不到**，只能重置（用户 2026-09-24 授权新增）。
 // 覆盖：
 //   · 鉴权 401 / 403（含数据范围）
-//   · 404 / 新密码缺失 / 新密码 < 6 位 → 400
+//   · 404 / 新密码缺失 / 新密码 < 12 位 → 400
 //   · 不能在这里重置自己的密码 → 400（自己走「账号设置」）
 //   · 成功重置：新密码能登录、**旧密码失效**、目标账号旧会话被作废、
 //     dataVersion 变化、审计留痕、**响应体里绝不出现密码或哈希**
-//   · ★ 只改 password 一个字段（其它字段逐字节不变）
+//   · ★ 只改 password 和首次登录强制改密标记（其它字段逐字节不变）
 //   · ★ `GET /api/users` 仍然剔除 password（回归）
 //   · 前端静态：按钮门禁、只走这个接口、输入是 type=password、有一次性展示、i18n key 齐全
 //
@@ -37,7 +37,7 @@ const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const now = () => new Date().toISOString();
 const md5 = (s) => crypto.createHash('md5').update(s).digest('hex');
 const PW = 'Test#12345';
-const NEW_PW = 'Reset#Pass9';
+const NEW_PW = 'Reset#Pass2026!';
 
 const PROD_ROLES = Object.keys(rbac.ROLE_GRANTS);
 const prodMatrixSnapshot = JSON.stringify(rbac.ROLE_GRANTS);
@@ -61,8 +61,8 @@ const fp = (c) => {
 const dv = () => store.dataVersion();
 const usersNow = () => store.readCollection('users') || [];
 const userById = (id) => usersNow().find(x => x.id === id);
-/** 去掉 password 后的账号快照 —— 用于证明「只改了 password」 */
-const shapeOf = (u) => { const { password, ...rest } = u; return JSON.stringify(rest); };
+/** 去掉允许改变的密码与强制改密字段，检查其它账号资料不变。 */
+const shapeOf = (u) => { const { password, mustChangePassword, ...rest } = u; return JSON.stringify(rest); };
 
 function seed() {
   store.writeCollection('stores', [
@@ -163,9 +163,9 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
   const before = JSON.stringify(userById('U-victim'));
   ok('缺 newPassword → 400', (await as('t_admin', 'POST', '/api/users/U-victim/reset-password', {})).status === 400);
   ok('newPassword 非字符串 → 400', (await as('t_admin', 'POST', '/api/users/U-victim/reset-password', { newPassword: 123456 })).status === 400);
-  const short = await reset('t_admin', 'U-victim', '12345');
-  ok('新密码 5 位 → 400', short.status === 400, short.status);
-  ok('文案是「新密码至少 6 位」', short.data.error === '新密码至少 6 位', short.data);
+  const short = await reset('t_admin', 'U-victim', '12345678901');
+  ok('新密码 11 位 → 400', short.status === 400, short.status);
+  ok('文案是「新密码至少 12 位」', short.data.error === '新密码至少 12 位', short.data);
   const self = await reset('t_admin', 'U-admin', NEW_PW);
   ok('重置自己 → 400', self.status === 400, self.status);
   ok('文案引导用「账号设置」', /账号设置/.test(self.data.error), self.data);
@@ -191,7 +191,8 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
   ok('★ 新哈希能校验新密码、校验不了旧密码',
     bcrypt.compareSync(NEW_PW, userById('U-victim').password) &&
     !bcrypt.compareSync(PW, userById('U-victim').password));
-  ok('★ 只改了 password：其余字段逐字节未变', shapeOf(userById('U-victim')) === shapeBefore);
+  ok('★ 只改了 password 与强制改密标记：其余字段逐字节未变', shapeOf(userById('U-victim')) === shapeBefore);
+  ok('★ 重置后首次登录必须改密', userById('U-victim').mustChangePassword === true);
   ok('★ dataVersion 发生变化', dv() !== dvBefore, { before: dvBefore, after: dv() });
   ok('★ 审计行已写入（且不含密码）',
     new RegExp('reset-password: t_victim \\(manager\\) by t_admin').test(auditText()) &&
@@ -200,6 +201,7 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
 
   console.log('\n【C-2】登录与会话行为');
   ok('★ 新密码可以登录 → 200', (await loginAs('t_victim', NEW_PW)) === 200);
+  ok('★ 新会话在改密前不能访问业务接口', (await as('t_victim', 'GET', '/api/users')).status === 401);
   ok('★ 旧密码已失效 → 401', (await loginAs('t_victim', PW)) === 401);
   ok('★ 重置前拿到的旧会话已被作废 → 401（无需等 TTL）', (await (async () => {
     // ⚠ 必须用「重置之前」那一份 cookie 去试：loginAs 会覆盖 cookies 变量，
@@ -230,8 +232,8 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
   ok('权限门用既有 system.user.edit（不新增权限）', /checkPerm\(req, res, 'system\.user\.edit'\)/.test(epBody));
   ok('范围门对目标资源判定', /check\(req, res, 'system\.user\.edit', target\)/.test(epBody));
   ok('禁止重置自己（自我护栏）', /reset-password rejected \(self\)/.test(epBody));
-  ok('长度校验 ≥ 6', /newPassword\.length < 6/.test(epBody));
-  ok('用 bcrypt 写入新哈希', /bcrypt\.hashSync\(newPassword, 10\)/.test(epBody));
+  ok('长度校验 ≥ 12', /newPassword\.length < 12/.test(epBody));
+  ok('用 bcrypt 12 轮写入新哈希', /bcrypt\.hashSync\(newPassword, 12\)/.test(epBody));
   ok('重置后作废该账号全部旧会话', /sessions\.delete\(sid\)/.test(epBody));
   ok('写入走 writeAll(\'users\')、并写审计', /writeAll\('users', users\)/.test(epBody) && /auditLog\(`reset-password: /.test(epBody));
   ok('★ 响应体不含 password / password_hash 字段',
@@ -257,15 +259,15 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
     rpdFn.length > 0 && npdFn.length > 0 && fnBody('suggestPassword').length > 0);
   ok('★ 按钮门禁：canResetPw ? 三元（自己那行不渲染）',
     /const canResetPw = canEdit && !isSelf;/.test(accFn) && /const btnResetPw = canResetPw \?/.test(accFn));
-  ok('★ 只请求 /api/users/:id/reset-password，且只在这个函数里 POST',
+  ok('★ 重置密码只请求 /api/users/:id/reset-password，且只在这个函数里 POST',
     (rpdFn.match(/\/api\/users\//g) || []).length === 1 &&
     /reset-password/.test(rpdFn) &&
-    !/\bPOST\(/.test(accFn) && !/\bPOST\(/.test(npdFn));
+    !/POST\('\/api\/users\/.*reset-password/.test(accFn) && !/\bPOST\(/.test(npdFn));
   ok('★ 新密码输入框是 type="password"（不明文显示）', /type="password" id="rpNew"/.test(rpdFn));
-  ok('★ 输入框带 minlength=6 与 autocomplete=new-password',
-    /minlength="6"/.test(rpdFn) && /autocomplete="new-password"/.test(rpdFn));
-  ok('★ 前端自己先校验 <6 位并提示（不靠后端兜底）',
-    /pw\.length < 6/.test(rpdFn) && /accounts\.resetPwNeed6/.test(rpdFn));
+  ok('★ 输入框带 minlength=12 与 autocomplete=new-password',
+    /minlength="12"/.test(rpdFn) && /autocomplete="new-password"/.test(rpdFn));
+  ok('★ 前端自己先校验 <12 位并提示（不靠后端兜底）',
+    /pw\.length < 12/.test(rpdFn) && /accounts\.resetPwNeed12/.test(rpdFn));
   ok('★ 成功后走「一次性展示」弹窗', /showNewPasswordDialog\(account, pw\)/.test(rpdFn));
   ok('★ 一次性展示里有复制按钮与「不再显示」提醒',
     /accounts\.resetPwCopy/.test(npdFn) && /clipboard|execCommand\('copy'\)/.test(npdFn) && /accounts\.resetPwOnce/.test(npdFn));
@@ -275,7 +277,7 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
     Number((IDX.match(/app\.js\?v=(\d+)/) || [])[1]) >= 38 &&
     Number((IDX.match(/i18n\.js\?v=(\d+)/) || [])[1]) >= 18,
     { app: (IDX.match(/app\.js\?v=(\d+)/) || [])[1], i18n: (IDX.match(/i18n\.js\?v=(\d+)/) || [])[1] });
-  ok('★ styles.css 版本号未变（本次仍不改样式）', /styles\.css\?v=26/.test(IDX));
+  ok('★ styles.css 使用版本化资源地址', Number((IDX.match(/styles\.css\?v=(\d+)/) || [])[1]) >= 26);
 
   const i18nKeys = new Set((I18N.match(/^\s*'([a-zA-Z][a-zA-Z0-9_.]*)':\s*\[/gm) || [])
     .map(s => s.trim().replace(/^'/, '').replace(/':\s*\[$/, '')));
@@ -288,7 +290,7 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
   const missingKeys = usedKeys.filter(k => !i18nKeys.has(k));
   ok('★ 用到的 ' + usedKeys.length + ' 个 i18n key 全部存在', missingKeys.length === 0, missingKeys);
   const needKeys = ['accounts.resetPw', 'accounts.resetPwTitle', 'accounts.resetPwBody', 'accounts.resetPwLabel',
-    'accounts.resetPwGenerate', 'accounts.resetPwNeed6', 'accounts.resetPwDone', 'accounts.resetPwDoneBody',
+    'accounts.resetPwGenerate', 'accounts.resetPwNeed12', 'accounts.resetPwDone', 'accounts.resetPwDoneBody',
     'accounts.resetPwCopy', 'accounts.resetPwCopied', 'accounts.resetPwOnce'];
   ok('★ 重置密码相关 ' + needKeys.length + ' 个 key 都已登记（中英双语）',
     needKeys.every(k => i18nKeys.has(k)), needKeys.filter(k => !i18nKeys.has(k)));

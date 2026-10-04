@@ -1,7 +1,14 @@
 // 积分引擎端到端测试（单进程内，绕过系统代理）
 // 规则基线（2026-09-11 v4）：每消费 ₱10 得 1 积分（返利 1%）· 10 积分抵 ₱1 · 抵扣无上限
 process.env.PORT = '3110';
-const APP = require('path').join(__dirname, '..');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
+process.env.SP_DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'sp-points-engine-'));
+const BOOTSTRAP_PASSWORD = 'LocalOnlyPointsBootstrap2026!';
+const CHANGED_PASSWORD = 'LocalOnlyPointsChanged2026!';
+process.env.SP_ADMIN_PASSWORD = BOOTSTRAP_PASSWORD;
+const APP = path.join(__dirname, '..');
 require(APP + '/server.js');
 
 const B = 'http://127.0.0.1:3110';
@@ -35,10 +42,16 @@ const rndPhone = () => '0999' + Math.floor(1000000 + Math.random() * 8999999);
   const rules = ra('rules');
   console.log(`\n规则(v${rules.schemaVersion})：每 ₱${rules.spendPerPoint} 得 1 分 | 兑换 ${rules.redeemRatio} | 门槛 ${rules.redeemMinPoints} 分 | 抵扣上限 ${rules.redeemMaxPercent === 0 ? '无上限' : rules.redeemMaxPercent + '%'} | 欢迎礼 ${rules.welcomeBonus} | 有效期 ${rules.expiryMonths} 月`);
 
-  const lg = await fetch(B + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: 'admin123' }) });
+  const lg = await fetch(B + '/api/auth/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'admin', password: BOOTSTRAP_PASSWORD }) });
   cookie = (lg.headers.getSetCookie?.() || []).map(c => c.split(';')[0]).join('; ');
   console.log('\n【1】登录与规则');
   ok('管理员登录', lg.status === 200);
+  const changed = await fetch(B + '/api/auth/change-password', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', cookie },
+    body: JSON.stringify({ currentPassword: BOOTSTRAP_PASSWORD, newPassword: CHANGED_PASSWORD }),
+  });
+  ok('首次登录强制改密完成', changed.status === 200, changed.status);
+  cookie = (changed.headers.getSetCookie?.() || []).map(c => c.split(';')[0]).join('; ');
   const rl = await api('GET', '/api/rules');
   ok('规则接口带 engine 运行时信息', !!rl.body?.engine);
   ok('生日双倍规则已移除', rl.body?.rules && !('birthdayDouble' in rl.body.rules));

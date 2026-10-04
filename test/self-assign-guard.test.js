@@ -245,6 +245,12 @@ const body = (u, n) => ({ username: u, name: n, password: 'Brand#New123' });
   const sc3 = lr.headers.getSetCookie ? lr.headers.getSetCookie() : [];
   cookie = sc3.map(c => c.split(';')[0]).join('; ');
   ok('s3_mgr 登录 → 200', lr.status === 200, lr.status);
+  const changed = await fetch(B + '/api/auth/change-password', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', cookie },
+    body: JSON.stringify({ currentPassword: 'Brand#New123', newPassword: 'Changed#New1234' }),
+  });
+  ok('新任店长首次登录后强制改密 → 200', changed.status === 200, changed.status);
+  cookie = (changed.headers.getSetCookie ? changed.headers.getSetCookie() : []).map(c => c.split(';')[0]).join('; ');
   const rr = await req('POST', '/api/stores/S3/managers', body('s3_mgr2', '想替换自己'), undefined);
   ok('★ S3 现任店长给自己门店任命新店长 → 被拒绝（400）', rr.status === 400,
     { status: rr.status, err: rr.data && rr.data.error });

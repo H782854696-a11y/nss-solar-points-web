@@ -16,7 +16,7 @@
 - Node.js + Express 服务端，静态前端位于 `public/`。
 - `server.js` 提供登录、权限、审批、任务、通知、门店跟进和审计 API。
 - `lib/` 按审批、权限、存储、报表、审计和提醒等职责拆分业务逻辑。数据可使用 JSON 存储或 Node 内置 `node:sqlite` SQLite 驱动。
-- `public/` 包含管理界面、样式、双语资源和 PWA manifest/service worker。PWA 可缓存页面外壳；业务 API 仍需联网。
+- `public/` 包含管理界面、样式、双语资源和 PWA manifest/service worker。PWA 可缓存页面外壳，离线时可匹配带版本参数的静态资源；只清理本应用旧缓存，不删除同域其他应用缓存。业务 API 仍需联网。
 - `deploy/` 保存 V2 独立目录发布、备份和 PM2 配置辅助脚本。它们未在本次交接准备中对生产服务器执行。
 - 主要运行依赖列于 `package.json` 与 `package-lock.json`：Express、cookie-parser、bcryptjs、nanoid。
 
@@ -58,7 +58,7 @@ node --check public/service-worker.js
 node --test --test-concurrency=1 test/*.test.js
 ```
 
-`scripts/acceptance_test.cjs` 是需连接本地隔离服务的验收脚本，不是独立测试。先用临时 `SP_DATA_DIR` 和非生产端口启动本地服务，再通过 `BASE=http://localhost:<端口> node scripts/acceptance_test.cjs` 执行。完整的本次检查结果和无法运行项记录在 [HANDOFF.md](HANDOFF.md)。
+`scripts/acceptance_test.cjs` 是需连接本地隔离服务的验收脚本，不是独立测试。先用临时 `SP_DATA_DIR` 和非生产端口启动本地服务，再通过 `BASE=http://localhost:<端口> node scripts/acceptance_test.cjs` 执行。当前 30 个测试文件在本地全部通过；浏览器人工验收和正式 `npm ci` 安装仍待进行。详细记录见 [HANDOFF.md](HANDOFF.md)。
 
 ## 部署说明
 

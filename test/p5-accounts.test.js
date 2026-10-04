@@ -403,8 +403,11 @@ const status = (who, id, disabled) => as(who, 'PUT', '/api/users/' + id + '/stat
     /\bPUT\(/.test(stFn) && !/\b(POST|DELETE|PATCH)\(/.test(stFn));
   ok('★ 删除动作只在 confirmUserDelete 里用 DELETE（没有 POST / PUT / PATCH）',
     /\bDELETE\(/.test(delFn) && !/\b(POST|PUT|PATCH)\(/.test(delFn));
-  ok('★ 列表只走 GET；页面里不存在任何 POST / PATCH',
-    /\bGET\(/.test(accFn) && !/\b(POST|PATCH)\(/.test(accFn + stFn + delFn));
+  ok('★ 旧账号列表走 GET；V2 创建账号只走专用 POST；启停和删除不走 POST/PATCH',
+    /GET\('\/api\/users'\)/.test(accFn) &&
+    /POST\('\/api\/v2\/users'/.test(accFn) &&
+    !/\bPATCH\(/.test(accFn + stFn + delFn) &&
+    !/\bPOST\(/.test(stFn + delFn));
   ok('★ 启停与删除只打这两个接口：/api/users（GET）与 /api/users/:id[/status]',
     (accFn.match(/\/api\/users/g) || []).length === 1 &&
     (stFn.match(/\/api\/users\//g) || []).length === 1 &&
@@ -448,8 +451,7 @@ const status = (who, id, disabled) => as(who, 'PUT', '/api/users/' + id + '/stat
   // i18n key 完整性
   const i18nKeys = new Set((I18N.match(/^\s*'([a-zA-Z][a-zA-Z0-9_.]*)':\s*\[/gm) || [])
     .map(s => s.trim().replace(/^'/, '').replace(/':\s*\[$/, '')));
-  const usedKeys = Array.from(new Set(((accFn + stFn).match(/t\('([a-zA-Z][a-zA-Z0-9_.]*)'/g) || [])
-    .map(s => s.replace(/^t\('/, '').replace(/'$/, ''))));
+  const usedKeys = Array.from(new Set(Array.from((accFn + stFn).matchAll(/(?:^|[^A-Za-z0-9_$])t\('([a-zA-Z][a-zA-Z0-9_.]*)'/g)).map(m => m[1])));
   const missingKeys = usedKeys.filter(k => !i18nKeys.has(k));
   ok('★ renderAccounts/confirmUserStatus 用到的 ' + usedKeys.length + ' 个 i18n key 全部存在',
     missingKeys.length === 0, missingKeys);

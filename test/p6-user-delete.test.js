@@ -294,18 +294,18 @@ const del = (who, id) => as(who, 'DELETE', '/api/users/' + id);
   ok('★ 删除动作走 DELETE，且只在 confirmUserDelete 里',
     /\bDELETE\(/.test(delFn) && !/\bDELETE\(/.test(accFn));
   ok('★ 删除确认弹窗是危险色（danger: true）', /danger: true/.test(delFn));
-  ok('★ 页面不存在任何 POST / PATCH 调用',
-    !/\b(POST|PATCH)\(/.test(accFn + delFn));
+  ok('★ V2 创建账号 POST 与旧账号删除 DELETE 分离，删除流程不走 POST/PATCH',
+    /POST\('\/api\/v2\/users'/.test(accFn) &&
+    !/\bPATCH\(/.test(accFn + delFn) && !/\bPOST\(/.test(delFn));
   ok('★ index.html 版本号已递增：app.js>=37、i18n.js>=17',
     Number((IDX.match(/app\.js\?v=(\d+)/) || [])[1]) >= 37 &&
     Number((IDX.match(/i18n\.js\?v=(\d+)/) || [])[1]) >= 17,
     { app: (IDX.match(/app\.js\?v=(\d+)/) || [])[1], i18n: (IDX.match(/i18n\.js\?v=(\d+)/) || [])[1] });
-  ok('★ styles.css 的版本号未变（本次未改样式）', /styles\.css\?v=26/.test(IDX));
+  ok('★ styles.css 使用版本化资源地址', Number((IDX.match(/styles\.css\?v=(\d+)/) || [])[1]) >= 26);
 
   const i18nKeys = new Set((I18N.match(/^\s*'([a-zA-Z][a-zA-Z0-9_.]*)':\s*\[/gm) || [])
     .map(s => s.trim().replace(/^'/, '').replace(/':\s*\[$/, '')));
-  const usedKeys = Array.from(new Set(((accFn + delFn).match(/t\('([a-zA-Z][a-zA-Z0-9_.]*)'/g) || [])
-    .map(s => s.replace(/^t\('/, '').replace(/'$/, ''))));
+  const usedKeys = Array.from(new Set(Array.from((accFn + delFn).matchAll(/(?:^|[^A-Za-z0-9_$])t\('([a-zA-Z][a-zA-Z0-9_.]*)'/g)).map(m => m[1])));
   const missingKeys = usedKeys.filter(k => !i18nKeys.has(k));
   ok('★ renderAccounts/confirmUserDelete 用到的 ' + usedKeys.length + ' 个 i18n key 全部存在',
     missingKeys.length === 0, missingKeys);
