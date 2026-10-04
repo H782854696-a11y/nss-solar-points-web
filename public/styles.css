@@ -245,6 +245,12 @@ button, input, select, textarea { font-family: inherit; }
   background: none; border-radius: 0; padding: 0;
 }
 .nav-group { padding: 14px 12px 10px; display: flex; flex-direction: column; gap: 4px; }
+.nav-group-legacy { display: block; }
+.nav-group-legacy[open] > .nav-item { margin-top: 4px; }
+.nav-group-legacy > summary { cursor: pointer; list-style: none; }
+.nav-group-legacy > summary::-webkit-details-marker { display: none; }
+.nav-group-legacy > summary::after { content: '›'; float: right; font-size: 15px; line-height: 11px; transition: transform .15s; }
+.nav-group-legacy[open] > summary::after { transform: rotate(90deg); }
 .nav-group-label {
   font-size: 10.5px; color: var(--nav-muted); font-weight: 600;
   letter-spacing: .12em; text-transform: uppercase;

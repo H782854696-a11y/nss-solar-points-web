@@ -60,7 +60,7 @@ test('PWA shell survives versioned offline URLs and preserves unrelated caches',
   assert.equal(claimed, true);
   assert.equal(stores.has('nss-control-shell-v11'), false);
   assert.equal(stores.has('unrelated-member-cache'), true);
-  assert.equal(stores.has('nss-control-shell-v13'), true);
+  assert.equal(stores.has('nss-control-shell-v14'), true);
 
   async function resource(url, mode = 'no-cors') {
     let responsePromise;
@@ -80,5 +80,5 @@ test('PWA shell survives versioned offline URLs and preserves unrelated caches',
   assert.equal(await resource('/api/v2/workflows'), undefined);
   online = true;
   assert.equal((await resource('/app.js?v=51')).name, '/app.js?v=51');
-  assert.equal(stores.get('nss-control-shell-v13').has('/app.js?v=51'), true);
+  assert.equal(stores.get('nss-control-shell-v14').has('/app.js?v=51'), true);
 });

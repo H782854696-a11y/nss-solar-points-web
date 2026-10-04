@@ -314,6 +314,7 @@ async function initApp() {
   $$('.nav-item').forEach(el => {
     el.style.display = canAccessScreen(el.dataset.screen) ? '' : 'none';
   });
+  $('#legacyNavGroup').open = false;
   // 门店列表接口需要 store.view。没有该权限就跳过请求 ——
   // 否则 403 会抛出异常、打断整个 initApp，页面停在半渲染状态。
   // （例如 sales 角色：门店信息对它是不可见的，跳过即可，不影响其它功能。）
@@ -380,6 +381,8 @@ function setScreen(name) {
   $$('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.screen === name);
   });
+  const legacyGroup = $('#legacyNavGroup');
+  if (legacyGroup?.querySelector(`.nav-item[data-screen="${name}"]`)) legacyGroup.open = true;
   updateHeaderCrumb();
   renderScreen();
 }

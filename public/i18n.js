@@ -63,6 +63,7 @@
     'nav.groupSystem': ['SYSTEM', '系统'],
     'nav.groupBiz': ['BUSINESS', '业务'],
     'nav.groupPoints': ['POINTS', '积分'],
+    'nav.groupLegacy': ['LEGACY MEMBER POINTS', '旧版会员积分'],
     'nav.dashboard': ['Overview', '经营总览'],
     'nav.members': ['Members', '会员管理'],
     'nav.rules': ['Points Rules', '积分规则'],
