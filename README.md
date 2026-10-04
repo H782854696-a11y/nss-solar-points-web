@@ -58,7 +58,7 @@ node --check public/service-worker.js
 node --test --test-concurrency=1 test/*.test.js
 ```
 
-`scripts/acceptance_test.cjs` 是需连接本地隔离服务的验收脚本，不是独立测试。先用临时 `SP_DATA_DIR` 和非生产端口启动本地服务，再通过 `BASE=http://localhost:<端口> node scripts/acceptance_test.cjs` 执行。当前 30 个测试文件在本地全部通过；浏览器人工验收和正式 `npm ci` 安装仍待进行。详细记录见 [HANDOFF.md](HANDOFF.md)。
+`scripts/acceptance_test.cjs` 是需连接本地隔离服务的验收脚本，不是独立测试。先用临时 `SP_DATA_DIR` 和非生产端口启动本地服务，再通过 `BASE=http://localhost:<端口> node scripts/acceptance_test.cjs` 执行。当前 30 个测试文件在本地全部通过；已在本地浏览器核对盘点 XLSX 导入和流程切换，其他逐角色浏览器验收、真实手机验证及正式 `npm ci` 安装仍待进行。详细记录见 [HANDOFF.md](HANDOFF.md)。
 
 ## 部署说明
 
