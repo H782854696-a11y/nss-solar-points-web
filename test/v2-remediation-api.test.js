@@ -92,6 +92,7 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
   assert.equal(managerStocktake.data.item.storeId, storeId, 'store manager request is bound to their store');
   const managerWorkflows = await request('GET', '/api/v2/workflows', null, managerCookie);
   assert.equal(managerWorkflows.data.items.some(item => item.id === managerStocktake.data.item.id), true);
+  assert.equal(managerWorkflows.data.pendingForMe, 0, 'own application is not a pending approval for the store manager');
   const managerTask = await request('POST', '/api/v2/tasks', { title: 'Store scoped task' }, managerCookie);
   assert.equal(managerTask.status, 201, JSON.stringify(managerTask.data));
   assert.equal(managerTask.data.item.storeId, storeId, 'store manager task is bound to their store');
@@ -107,12 +108,15 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
   const adminList = await request('GET', '/api/v2/workflows', null, admin);
   assert.equal(adminList.status, 200);
   assert.equal(adminList.data.items.some(item => item.id === id), true, 'administrator can see a newly submitted request');
+  assert.equal(adminList.data.pendingForMe, 1, 'administrator can approve the manager request, but not their own request');
   const reviewerList = await request('GET', '/api/v2/workflows', null, reviewer.cookie);
   assert.equal(reviewerList.status, 200);
   assert.equal(reviewerList.data.items.some(item => item.id === id), true, 'Philippines reviewer can see a request in scope');
+  assert.equal(reviewerList.data.pendingForMe, 2, 'reviewer has two actionable requests');
   const unassignedSalesList = await request('GET', '/api/v2/workflows', null, salesA.cookie);
   assert.equal(unassignedSalesList.status, 200);
   assert.equal(unassignedSalesList.data.items.some(item => item.id === id), false, 'unassigned store user cannot see a freeform remediation request');
+  assert.equal(unassignedSalesList.data.pendingForMe, 0, 'frontline user has no approval permission');
   const approved = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'approve' }, reviewer.cookie);
   assert.equal(approved.status, 200, JSON.stringify(approved.data));
   assert.equal(approved.data.item.status, 'approved');

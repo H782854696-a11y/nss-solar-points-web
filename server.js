@@ -2253,6 +2253,7 @@ app.get('/api/v2/workflows', (req, res) => {
     countsByType[x.type] = countsByType[x.type] || {};
     countsByType[x.type][x.status] = (countsByType[x.type][x.status] || 0) + 1;
   });
+  const pendingForMe = visible.filter(x => x.status === 'pending_approval' && x.createdBy !== u.id && controlCenter.WORKFLOW_TYPES[x.type] && controlVisible(req, 'workflow.approve', x) && approvalSlotForActor(x, u)).length;
   let items = visible;
   if (status) items = items.filter(x => x.status === status);
   if (type) items = items.filter(x => x.type === type);
@@ -2262,7 +2263,7 @@ app.get('/api/v2/workflows', (req, res) => {
   const total = items.length, limit = Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || 25));
   const rawOffset = Math.max(0, parseInt(req.query.offset, 10) || 0);
   const offset = total ? Math.min(rawOffset, Math.floor((total - 1) / limit) * limit) : 0;
-  res.json({ items: items.slice(offset, offset + limit), total, offset, limit, counts, countsByType });
+  res.json({ items: items.slice(offset, offset + limit), total, offset, limit, counts, countsByType, pendingForMe });
 });
 app.post('/api/v2/workflows', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });

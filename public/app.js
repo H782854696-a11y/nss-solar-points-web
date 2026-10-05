@@ -773,7 +773,7 @@ async function renderControlCenter(root) {
   root.innerHTML = `
     <div class="page-header"><div class="page-header-text"><div class="page-title">${ccText('Group Control Center', '集团中控')}</div><div class="page-subtitle">${ccText('Approvals, tasks, store follow-up and audit', '审批流程、任务协作、门店整改与审计监督')}</div></div></div>
     <section class="cc-overview"><div class="cc-overview-grid">
-      <button type="button" class="card cc-overview-card" data-cc-jump="approvals"><span>${ccText('Pending approvals', '待审批')}</span><strong>${Number(workflowData.counts?.pending_approval || 0)}</strong></button>
+      <button type="button" class="card cc-overview-card" data-cc-jump="approvals"><span>${ccText('My pending approvals', '待我审批')}</span><strong>${Number(workflowData.pendingForMe || 0)}</strong></button>
       <button type="button" class="card cc-overview-card" data-cc-jump="collaboration"><span>${ccText('Open tasks', '未完成任务')}</span><strong>${Number(taskData.counts?.open || 0) + Number(taskData.counts?.in_progress || 0)}</strong></button>
       <button type="button" class="card cc-overview-card" data-cc-jump="approvals"><span>${ccText('Open store remediation', '未完成门店整改')}</span><strong>${openRemediationCount}</strong></button>
       <button type="button" class="card cc-overview-card" data-cc-jump="collaboration"><span>${ccText('Unread notifications', '未读通知')}</span><strong>${Number(noticeData.unread || 0)}</strong></button>

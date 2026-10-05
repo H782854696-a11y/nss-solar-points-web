@@ -278,7 +278,7 @@ button, input, select, textarea { font-family: inherit; }
 .cc-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
 .cc-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--muted); font-size: 12px; }
 .cc-field input, .cc-field select, .cc-field textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 9px 10px; background: var(--surface); color: var(--ink); font: inherit; }
-.cc-wide { grid-column: 1 / -1; }
+.cc-wide { grid-column: 1 / -1; min-width: 0; }
 .cc-list { display: grid; gap: 10px; }
 .cc-card { padding: 14px 16px; }
 .cc-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
@@ -316,7 +316,7 @@ button, input, select, textarea { font-family: inherit; }
 .cc-stocktake-table td:first-child input { min-width: 120px; }
 .cc-stocktake-table .cc-stocktake-empty { padding: 22px; text-align: center; color: var(--muted); }
 .cc-stocktake-pager { margin: 8px 0 14px; }
-@media (max-width: 700px) { .cc-form-grid { grid-template-columns: 1fr; } .cc-wide { grid-column: auto; } .cc-card-top { flex-direction: column; } .cc-task-filters { grid-template-columns: 1fr 1fr; } .cc-task-filters input, .cc-task-filters span { grid-column: 1 / -1; } .cc-workflow-filters { grid-template-columns: 1fr 1fr; } .cc-workflow-filters input, .cc-workflow-filters span { grid-column: 1 / -1; } }
+@media (max-width: 700px) { .cc-form-grid { grid-template-columns: minmax(0, 1fr); } .cc-wide { grid-column: auto; } .cc-card-top { flex-direction: column; } .cc-task-filters { grid-template-columns: 1fr 1fr; } .cc-task-filters input, .cc-task-filters span { grid-column: 1 / -1; } .cc-workflow-filters { grid-template-columns: 1fr 1fr; } .cc-workflow-filters input, .cc-workflow-filters span { grid-column: 1 / -1; } }
 .sidebar-spacer { flex: 1; }
 .user-block {
   display: flex; align-items: center; gap: 10px;
