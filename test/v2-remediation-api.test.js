@@ -81,6 +81,12 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
     accounts.push({ id: created.data.item.id, username, cookie: await loginAndChange(username, userPassword, userChangedPassword) });
   }
   const [reviewer, salesA, salesB] = accounts;
+  const adminTaskAssignees = await request('GET', '/api/v2/task-assignees', null, admin);
+  assert.equal(adminTaskAssignees.status, 200);
+  assert.equal(adminTaskAssignees.data.items.length, 0, 'system administrator cannot assign business tasks');
+  const reviewerTaskAssignees = await request('GET', '/api/v2/task-assignees', null, reviewer.cookie);
+  assert.equal(reviewerTaskAssignees.status, 200);
+  assert.equal(reviewerTaskAssignees.data.items.some(item => item.id === salesA.id), true, 'Philippines manager sees an eligible sales assignee');
   const managerAccount = await request('POST', '/api/v2/users', { username: 'v2_store_manager', name: 'v2_store_manager', role: 'manager', storeId, password: userPassword }, admin);
   assert.equal(managerAccount.status, 201, JSON.stringify(managerAccount.data));
   const managerCookie = await loginAndChange('v2_store_manager', userPassword, userChangedPassword);

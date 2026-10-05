@@ -2768,7 +2768,8 @@ app.post('/api/v2/store-issues/:id/close', (req, res) => {
 });
 app.get('/api/v2/task-assignees', (req, res) => {
   if (!guard.checkPerm(req, res, 'task.assign')) return;
-  const users = (readAll('users') || []).filter(x => !x.disabled).filter(x => controlVisible(req, 'task.assign', { storeId: x.storeId, country: 'PH', createdBy: x.id }));
+  const actor = getSessionUser(req);
+  const users = (readAll('users') || []).filter(x => !x.disabled && rbac.canAssign(actor, x, 'task').ok).filter(x => controlVisible(req, 'task.assign', { storeId: x.storeId, country: 'PH', createdBy: x.id }));
   res.json({ items: users.map(x => ({ id: x.id, name: x.name || x.username, username: x.username, storeId: x.storeId || null })) });
 });
 app.get('/api/v2/alert-assignees', (req, res) => {
