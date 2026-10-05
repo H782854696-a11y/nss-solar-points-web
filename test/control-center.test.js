@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const controlCenter = require('../lib/control-center');
 const rbac = require('../lib/rbac');
+const guard = require('../lib/rbac-guard');
 
 const validStocktake = (overrides = {}) => ({
   type: 'stocktake',
@@ -85,4 +86,14 @@ test('assigned frontline staff can execute their own remediation without accessi
     assert.equal(rbac.can(executor, 'workflow.execute', request), true, `${role} must execute its assigned remediation`);
     assert.equal(rbac.can(other, 'workflow.execute', request), false, `${role} must not execute another person's remediation`);
   }
+});
+
+test('scope lookup accepts both a resource family and an exact permission', () => {
+  const manager = { id: 'manager-1', role: 'manager', storeId: 'store-1' };
+  guard.configure(() => manager);
+  assert.equal(guard.scopeOf({}, 'workflow').level, 'store');
+  assert.equal(guard.scopeOf({}, 'workflow.create').level, 'store');
+  assert.equal(guard.scopeOf({}, 'workflow.create').storeId, 'store-1');
+  assert.equal(guard.scopeOf({}, 'task.create').level, 'store');
+  assert.equal(guard.scopeOf({}, 'workflow.approve').level, 'none');
 });

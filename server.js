@@ -1944,18 +1944,15 @@ app.get('/api/audit-log', (req, res) => {
 // 新功能使用独立集合和 workflow.* 权限，不复用旧的积分审核 pending 集合。
 function controlVisible(req, permission, item) {
   const currentUser = getSessionUser(req);
-  if (permission === 'workflow.view' && item?.type === 'store_remediation' && item.assigneeId === currentUser?.id && rbac.hasPermission(currentUser, permission)) return true;
-  const sc = guard.scopeOf(req, permission);
-  if (sc.level === 'global' || sc.level === 'hq' || sc.level === 'philippines') return true;
-  if (sc.level === 'region') {
-    let regionId = item.regionId || null;
-    if (!regionId && item.storeId) regionId = (readAll('stores') || []).find(x => x.id === item.storeId)?.regionId || null;
-    if (!regionId && item.warehouseId) regionId = (readAll('warehouses') || []).find(x => x.id === item.warehouseId)?.regionId || null;
-    return !!sc.regionId && regionId === sc.regionId;
-  }
-  if (sc.level === 'store') return !!sc.storeId && item.storeId === sc.storeId;
-  if (sc.level === 'self') return item.createdBy === sc.employeeId || item.assigneeId === sc.employeeId || item.userId === sc.employeeId;
-  return false;
+  if (!currentUser || !item || !rbac.hasPermission(currentUser, permission)) return false;
+  if (permission === 'workflow.view' && item.type === 'store_remediation' && item.assigneeId === currentUser.id) return true;
+  // This helper receives an exact permission (for example workflow.view).
+  // scopeOf expects a resource prefix, so use can() to apply that permission's actual scope.
+  if (rbac.permScope(currentUser, permission) === 'self' && item.userId && (item.userId === currentUser.id || item.userId === currentUser.employeeId)) return true;
+  let regionId = item.regionId || null;
+  if (!regionId && item.storeId) regionId = (readAll('stores') || []).find(x => x.id === item.storeId)?.regionId || null;
+  if (!regionId && item.warehouseId) regionId = (readAll('warehouses') || []).find(x => x.id === item.warehouseId)?.regionId || null;
+  return rbac.can(currentUser, permission, { ...item, regionId, country: item.country || item.countryCode || 'PH' });
 }
 function canExecuteRemediation(req, res, item) {
   const user = getSessionUser(req);

@@ -66,6 +66,14 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
   const stores = await request('GET', '/api/stores', null, admin);
   assert.equal(stores.status, 200);
   const storeId = stores.data.items[0].id;
+  const organizations = await request('GET', '/api/v2/organizations', null, admin);
+  assert.equal(organizations.status, 200);
+  assert.equal(organizations.data.items.length > 0, true, 'administrator can see seeded organizations');
+  const newTask = await request('POST', '/api/v2/tasks', { title: 'Isolated task list check', storeId }, admin);
+  assert.equal(newTask.status, 201, JSON.stringify(newTask.data));
+  const taskList = await request('GET', '/api/v2/tasks', null, admin);
+  assert.equal(taskList.status, 200);
+  assert.equal(taskList.data.items.some(item => item.id === newTask.data.item.id), true, 'administrator can see a newly created task');
   const accounts = [];
   for (const [username, role] of [['v2_ph_reviewer', 'philippines_manager'], ['v2_sales_a', 'sales'], ['v2_sales_b', 'sales']]) {
     const created = await request('POST', '/api/v2/users', { username, name: username, role, storeId: role === 'sales' ? storeId : null, password: userPassword }, admin);
@@ -73,6 +81,22 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
     accounts.push({ id: created.data.item.id, username, cookie: await loginAndChange(username, userPassword, userChangedPassword) });
   }
   const [reviewer, salesA, salesB] = accounts;
+  const managerAccount = await request('POST', '/api/v2/users', { username: 'v2_store_manager', name: 'v2_store_manager', role: 'manager', storeId, password: userPassword }, admin);
+  assert.equal(managerAccount.status, 201, JSON.stringify(managerAccount.data));
+  const managerCookie = await loginAndChange('v2_store_manager', userPassword, userChangedPassword);
+  const managerStocktake = await request('POST', '/api/v2/workflows', {
+    type: 'stocktake', title: 'Store scoped stocktake',
+    form: { warehouseName: 'Local count location', countDate: '2026-10-04', reason: 'Isolated scope check', items: [{ itemCode: 'SCOPE-001', countedQuantity: 0 }] },
+  }, managerCookie);
+  assert.equal(managerStocktake.status, 201, JSON.stringify(managerStocktake.data));
+  assert.equal(managerStocktake.data.item.storeId, storeId, 'store manager request is bound to their store');
+  const managerWorkflows = await request('GET', '/api/v2/workflows', null, managerCookie);
+  assert.equal(managerWorkflows.data.items.some(item => item.id === managerStocktake.data.item.id), true);
+  const managerTask = await request('POST', '/api/v2/tasks', { title: 'Store scoped task' }, managerCookie);
+  assert.equal(managerTask.status, 201, JSON.stringify(managerTask.data));
+  assert.equal(managerTask.data.item.storeId, storeId, 'store manager task is bound to their store');
+  const managerTasks = await request('GET', '/api/v2/tasks', null, managerCookie);
+  assert.equal(managerTasks.data.items.some(item => item.id === managerTask.data.item.id), true);
   const created = await request('POST', '/api/v2/workflows', {
     type: 'store_remediation', title: 'Isolated remediation check',
     form: { storeName: 'Test location', issue: 'Broken safety sign', dueDate: '2026-12-31' },
@@ -80,6 +104,15 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
   assert.equal(created.status, 201, JSON.stringify(created.data));
   const id = created.data.item.id;
   assert.equal(created.data.item.assigneeId, null);
+  const adminList = await request('GET', '/api/v2/workflows', null, admin);
+  assert.equal(adminList.status, 200);
+  assert.equal(adminList.data.items.some(item => item.id === id), true, 'administrator can see a newly submitted request');
+  const reviewerList = await request('GET', '/api/v2/workflows', null, reviewer.cookie);
+  assert.equal(reviewerList.status, 200);
+  assert.equal(reviewerList.data.items.some(item => item.id === id), true, 'Philippines reviewer can see a request in scope');
+  const unassignedSalesList = await request('GET', '/api/v2/workflows', null, salesA.cookie);
+  assert.equal(unassignedSalesList.status, 200);
+  assert.equal(unassignedSalesList.data.items.some(item => item.id === id), false, 'unassigned store user cannot see a freeform remediation request');
   const approved = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'approve' }, reviewer.cookie);
   assert.equal(approved.status, 200, JSON.stringify(approved.data));
   assert.equal(approved.data.item.status, 'approved');
@@ -103,6 +136,8 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
   const reassigned = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'assign', assigneeId: salesB.id }, reviewer.cookie);
   assert.equal(reassigned.status, 200, JSON.stringify(reassigned.data));
   assert.equal(reassigned.data.item.executionRound, 2);
+  const formerAssigneeList = await request('GET', '/api/v2/workflows', null, salesA.cookie);
+  assert.equal(formerAssigneeList.data.items.some(item => item.id === id), false, 'former assignee loses list visibility');
   assert.equal((await upload(salesA.cookie, 'before')).status, 403);
   const staleEvidence = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'execution', executionStatus: 'completed' }, salesB.cookie);
   assert.equal(staleEvidence.status, 409);
