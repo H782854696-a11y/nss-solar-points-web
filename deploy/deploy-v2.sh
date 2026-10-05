@@ -111,10 +111,18 @@ PM2
 SWITCH_LINK="$APP_ROOT/current.next-$RELEASE_ID"
 ln -s "$NEW_RELEASE" "$SWITCH_LINK"
 mv -Tf "$SWITCH_LINK" "$APP_ROOT/current"
-if ! pm2 startOrReload "$APP_ROOT/ecosystem.v2.config.cjs" --update-env; then
+# PM2 keeps the original script path when startOrReload targets an existing app.
+# Replace only the V2 process so that it actually uses the current release link.
+start_current_release() {
+  if pm2 describe solarpoints-v2 >/dev/null 2>&1; then
+    pm2 delete solarpoints-v2 || return 1
+  fi
+  pm2 start "$APP_ROOT/ecosystem.v2.config.cjs" --update-env
+}
+if ! start_current_release; then
   ln -sfn "$OLD_RELEASE" "$SWITCH_LINK"
   mv -Tf "$SWITCH_LINK" "$APP_ROOT/current"
-  pm2 startOrReload "$APP_ROOT/ecosystem.v2.config.cjs" --update-env || true
+  start_current_release || true
   pm2 save || true
   exit 4
 fi
@@ -133,7 +141,7 @@ done
 if [[ "$healthy" != 1 ]]; then
   ln -sfn "$OLD_RELEASE" "$SWITCH_LINK"
   mv -Tf "$SWITCH_LINK" "$APP_ROOT/current"
-  pm2 startOrReload "$APP_ROOT/ecosystem.v2.config.cjs" --update-env || true
+  start_current_release || true
   pm2 save || true
   echo "V2 health check failed; restored the prior code release. Backup: $BACKUP_FILE" >&2
   exit 5
