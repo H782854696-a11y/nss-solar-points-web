@@ -54,7 +54,7 @@
 - `README-V2.md`、`ARCHITECTURE-V2.md`、`IMPLEMENTATION-STATUS.md`：产品范围、架构及实现状态记录。
 - `.env.example`：仅含变量名和安全占位示例；程序不会自动加载 `.env`。
 - `.gitignore`：忽略凭据、环境文件、运行数据、数据库/导出/备份、依赖和构建缓存，同时保留可移植发布脚本。
-- 源码快照保存在项目上级 `outputs/`；本轮计划以最新本地提交另存 `NSS-Solar-V2-Handoff-20261005-scope.zip`，供跨账号传递。不含运行数据、`.env`、密钥、数据库、Nginx 主机配置或临时管理员凭据。旧压缩包保留作历史版本。
+- 源码快照保存在项目上级 `outputs/`；使用 `git archive` 从本地提交生成，供跨账号传递。不含运行数据、`.env`（仅保留安全样例 `.env.example`）、密钥、数据库、Nginx 主机配置或临时管理员凭据。旧压缩包保留作历史版本。
 
 ### 架构、技术栈和设计决定
 
@@ -69,7 +69,7 @@
 - 仓库 URL：`https://github.com/H782854696-a11y/nss-solar-points-web.git`（用户提供的私有仓库）。
 - 当前分支：`main`；`origin` 已配置为上述 URL。
 - 最新 commit：以 `git log -1 --format='%H %s'` 查询当前准确 SHA 和提交信息。用户指定的 `chore: save NSS Solar V2 handoff snapshot` 是早期快照，之后已有本地修正。
-- 推送是否成功：当前执行环境无法确认。最近两次 `git push -u origin main` 分别返回 `Device not configured` 与 `Operation not permitted`，均未由本环境写入远端。用户随后表示已在本机提交，但本环境 `git ls-remote` 仍因无 HTTPS 凭据失败，且 `main` 无 upstream。请在有授权的终端核对 `origin/main` 的 SHA。
+- 推送是否成功：当前执行环境无法确认。先前两次 `git push -u origin main` 分别返回 `Device not configured` 与 `Operation not permitted`，均未由本环境写入远端。2026-10-05 获得任务网络权限后重试只读 `git ls-remote --heads origin main`，仍因缺少 GitHub HTTPS 用户凭据而失败；用户此前表示已在本机提交，但 `main` 无 upstream。请在有授权的终端核对 `origin/main` 的 SHA。
 - 未提交/未跟踪文件：本轮提交后应运行 `git status --porcelain=v1 -uall` 核实；项目依赖 `node_modules/` 被忽略，不应提交。`.env.example` 是安全占位样例；敏感路径扫描及私钥/AWS/GitHub token 常见模式扫描未发现命中。
 - 初始交接快照新增 `README.md`、`.env.example`、`HANDOFF.md`，更新 `.gitignore`，并使 `deploy/deploy-v2.sh` 的 SSH 主机必须显式传入。后续本地修正了整改负责人权限与指派入口、过时的 RBAC 数量断言、盘点导入区默认可见性，并更新 PWA 缓存版本及交接记录；未发布生产。
 - 源码进入本地 Git 前原本没有 Git 基线，因此这是项目快照根提交，不能据此区分更早代码修改的时间或作者。
@@ -165,7 +165,7 @@ npm start
 
 ### 必须解决
 
-- **GitHub 推送状态未核实：** 本地 `main` 已提交，`origin` 已设置；当前执行环境的 HTTPS 凭据不可用，用户在本机操作后的远端结果尚不能由此环境确认。需在有授权的本机终端核对远端 SHA，再决定是否推送新增提交。
+- **GitHub 推送状态未核实：** 本地 `main` 已提交，`origin` 已设置；2026-10-05 的远端读取因缺少 HTTPS 凭据而失败，用户在本机操作后的远端结果尚不能由此环境确认。需在有授权的本机终端核对远端 SHA，再决定是否推送新增提交。
 - **本轮保存检查：** 2026-10-05 检查 `origin`、`main`、`.gitignore` 和当前改动；忽略规则覆盖环境文件、密钥、运行数据、数据库、备份及构建缓存。最新权限修正的隔离回归 31 项通过；推送后请以 `git log -1` 和 `git status` 核对最终提交与剩余改动。
 - **完整浏览器与真实设备验收未完成：** 自动化 31 项测试全绿，盘点 XLSX 导入及流程切换已在本地浏览器核对；列表权限修正后的界面、真实手机安装/断网、逐角色业务闭环和完整双语页面仍待验收。
 - **生产状态未经本轮复核：** 历史记录称 V2 使用 `/opt/solarpoints-v2/`，但当前服务进程、代码版本、备份和域名解析没有本轮确认。
