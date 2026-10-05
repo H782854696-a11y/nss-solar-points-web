@@ -2253,17 +2253,19 @@ app.get('/api/v2/workflows', (req, res) => {
     countsByType[x.type] = countsByType[x.type] || {};
     countsByType[x.type][x.status] = (countsByType[x.type][x.status] || 0) + 1;
   });
-  const pendingForMe = visible.filter(x => x.status === 'pending_approval' && x.createdBy !== u.id && controlCenter.WORKFLOW_TYPES[x.type] && controlVisible(req, 'workflow.approve', x) && approvalSlotForActor(x, u)).length;
+  const actionableIds = new Set(visible.filter(x => x.status === 'pending_approval' && x.createdBy !== u.id && controlCenter.WORKFLOW_TYPES[x.type] && controlVisible(req, 'workflow.approve', x) && approvalSlotForActor(x, u)).map(x => x.id));
+  const pendingForMe = actionableIds.size;
   let items = visible;
   if (status) items = items.filter(x => x.status === status);
   if (type) items = items.filter(x => x.type === type);
   if (req.query.mine === '1') items = items.filter(x => x.createdBy === u.id);
+  if (req.query.actionable === '1') items = items.filter(x => actionableIds.has(x.id));
   if (query) items = items.filter(x => [x.title, x.createdByName, x.assigneeName, x.storeId, x.regionId, x.externalDocumentNumber, ...Object.entries(x.form || {}).filter(([key]) => key !== 'items').map(([, value]) => value)].filter(Boolean).join(' ').toLocaleLowerCase().includes(query));
   items.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   const total = items.length, limit = Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || 25));
   const rawOffset = Math.max(0, parseInt(req.query.offset, 10) || 0);
   const offset = total ? Math.min(rawOffset, Math.floor((total - 1) / limit) * limit) : 0;
-  res.json({ items: items.slice(offset, offset + limit), total, offset, limit, counts, countsByType, pendingForMe });
+  res.json({ items: items.slice(offset, offset + limit).map(x => ({ ...x, actionableForMe: actionableIds.has(x.id) })), total, offset, limit, counts, countsByType, pendingForMe });
 });
 app.post('/api/v2/workflows', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });

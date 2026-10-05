@@ -93,6 +93,7 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
   const managerWorkflows = await request('GET', '/api/v2/workflows', null, managerCookie);
   assert.equal(managerWorkflows.data.items.some(item => item.id === managerStocktake.data.item.id), true);
   assert.equal(managerWorkflows.data.pendingForMe, 0, 'own application is not a pending approval for the store manager');
+  assert.equal(managerWorkflows.data.items.find(item => item.id === managerStocktake.data.item.id).actionableForMe, false);
   const managerTask = await request('POST', '/api/v2/tasks', { title: 'Store scoped task' }, managerCookie);
   assert.equal(managerTask.status, 201, JSON.stringify(managerTask.data));
   assert.equal(managerTask.data.item.storeId, storeId, 'store manager task is bound to their store');
@@ -109,10 +110,20 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
   assert.equal(adminList.status, 200);
   assert.equal(adminList.data.items.some(item => item.id === id), true, 'administrator can see a newly submitted request');
   assert.equal(adminList.data.pendingForMe, 1, 'administrator can approve the manager request, but not their own request');
+  assert.equal(adminList.data.items.find(item => item.id === id).actionableForMe, false, 'own request has no approval action');
+  assert.equal(adminList.data.items.find(item => item.id === managerStocktake.data.item.id).actionableForMe, true);
+  const adminActionable = await request('GET', '/api/v2/workflows?actionable=1', null, admin);
+  assert.equal(adminActionable.status, 200);
+  assert.equal(adminActionable.data.total, 1, 'actionable filter excludes the administrator’s own request');
+  assert.equal(adminActionable.data.items[0].id, managerStocktake.data.item.id);
   const reviewerList = await request('GET', '/api/v2/workflows', null, reviewer.cookie);
   assert.equal(reviewerList.status, 200);
   assert.equal(reviewerList.data.items.some(item => item.id === id), true, 'Philippines reviewer can see a request in scope');
   assert.equal(reviewerList.data.pendingForMe, 2, 'reviewer has two actionable requests');
+  const reviewerActionable = await request('GET', '/api/v2/workflows?actionable=1&limit=1', null, reviewer.cookie);
+  assert.equal(reviewerActionable.data.total, 2, 'actionable filter count precedes pagination');
+  assert.equal(reviewerActionable.data.items.length, 1);
+  assert.equal(reviewerActionable.data.items[0].actionableForMe, true);
   const unassignedSalesList = await request('GET', '/api/v2/workflows', null, salesA.cookie);
   assert.equal(unassignedSalesList.status, 200);
   assert.equal(unassignedSalesList.data.items.some(item => item.id === id), false, 'unassigned store user cannot see a freeform remediation request');
