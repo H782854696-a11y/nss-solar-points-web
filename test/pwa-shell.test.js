@@ -10,7 +10,7 @@ test('PWA shell survives versioned offline URLs and preserves unrelated caches',
   const listeners = new Map();
   const stores = new Map([
     ['nss-control-shell-v11', new Map([['/old.js', { name: 'old' }]])],
-    ['unrelated-member-cache', new Map([['/member.js', { name: 'member' }]])],
+    ['unrelated-member-cache', new Map([['/member.js', { name: 'member' }], ['/app.js', { name: 'wrong-member-app' }]])],
   ]);
   const keyOf = request => typeof request === 'string' ? request : new URL(request.url).pathname + new URL(request.url).search;
   const caches = {
@@ -20,6 +20,15 @@ test('PWA shell survives versioned offline URLs and preserves unrelated caches',
       return {
         async addAll(urls) { for (const url of urls) entries.set(url, { name: url, ok: true }); },
         async put(request, response) { entries.set(keyOf(request), response); },
+        async match(request, options = {}) {
+          const key = keyOf(request);
+          if (entries.has(key)) return entries.get(key);
+          if (options.ignoreSearch) {
+            const pathname = key.split('?')[0];
+            for (const [candidate, response] of entries) if (candidate.split('?')[0] === pathname) return response;
+          }
+          return undefined;
+        },
       };
     },
     async keys() { return [...stores.keys()]; },
@@ -60,7 +69,7 @@ test('PWA shell survives versioned offline URLs and preserves unrelated caches',
   assert.equal(claimed, true);
   assert.equal(stores.has('nss-control-shell-v11'), false);
   assert.equal(stores.has('unrelated-member-cache'), true);
-  assert.equal(stores.has('nss-control-shell-v17'), true);
+  assert.equal(stores.has('nss-control-shell-v20'), true);
 
   async function resource(url, mode = 'no-cors') {
     let responsePromise;
@@ -80,5 +89,5 @@ test('PWA shell survives versioned offline URLs and preserves unrelated caches',
   assert.equal(await resource('/api/v2/workflows'), undefined);
   online = true;
   assert.equal((await resource('/app.js?v=51')).name, '/app.js?v=51');
-  assert.equal(stores.get('nss-control-shell-v17').has('/app.js?v=51'), true);
+  assert.equal(stores.get('nss-control-shell-v20').has('/app.js?v=51'), true);
 });

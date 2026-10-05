@@ -51,7 +51,12 @@ async function api(method, path, body, isForm) {
   } else if (body && isForm) {
     opts.body = body; // FormData
   }
-  const res = await fetch(path, opts);
+  let res;
+  try { res = await fetch(path, opts); }
+  catch (error) {
+    if (navigator.onLine === false) throw new Error(ccText('You are offline. Reconnect to submit or refresh business data.', '当前已离线，请联网后提交或刷新业务数据。'));
+    throw new Error(ccText('Cannot connect to the server. Check your connection and try again.', '无法连接服务器，请检查网络后重试。'));
+  }
   // 登录接口的 401 表示账号/密码校验失败，应显示服务端的准确提示；
   // 其它接口的 401 才表示当前会话已失效。
   if (res.status === 401 && path !== '/api/auth/login') {
@@ -161,7 +166,10 @@ async function bootstrap() {
     await loadMe();
     if (state.me.mustChangePassword) renderMandatoryPasswordChange();
     else { showApp(); initApp(); }
-  } catch (e) { showLogin(); }
+  } catch (e) {
+    showLogin();
+    if (navigator.onLine === false) $('#loginError').textContent = e.message;
+  }
   $('#loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const fd = new FormData(e.target);
@@ -411,7 +419,8 @@ async function renderScreen() {
     else if (state.screen === 'accounts') await renderAccounts(root);
     else if (state.screen === 'account') renderAccount(root);
   } catch (e) {
-    root.innerHTML = `<div class="card">${t('common.loadFailed', { msg: escapeHtml(e.message) })}</div>`;
+    root.innerHTML = `<div class="card"><p>${t('common.loadFailed', { msg: escapeHtml(e.message) })}</p><button class="btn btn-primary" type="button" id="screenRetry">${ccText('Retry', '重试')}</button></div>`;
+    root.querySelector('#screenRetry').addEventListener('click', () => { renderScreen(); });
   }
 }
 
@@ -572,9 +581,21 @@ function downloadStocktakeCsv(items, filename) {
   document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
 }
 
-function readFileAsDataUrl(file) {
+function uploadMimeType(file) {
+  const extension = String(file.name || '').split('.').pop().toLowerCase();
+  return ({ pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', csv: 'text/csv', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }[extension] || file.type || 'application/octet-stream');
+}
+
+function readFileAsDataUrl(file, mimeType) {
   return new Promise((resolve, reject) => {
-    const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error(ccText('Could not read file', '无法读取文件'))); reader.readAsDataURL(file);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const match = String(reader.result || '').match(/^data:[^,]*;base64,([A-Za-z0-9+/]+={0,2})$/);
+      if (!match) { reject(new Error(ccText('Could not read file', '无法读取文件'))); return; }
+      resolve(`data:${mimeType};base64,${match[1]}`);
+    };
+    reader.onerror = () => reject(new Error(ccText('Could not read file', '无法读取文件')));
+    reader.readAsDataURL(file);
   });
 }
 
@@ -873,7 +894,7 @@ async function renderControlCenter(root) {
     try {
       const created = await POST('/api/v2/workflows', { type, title: fd.get('title'), form });
       if (sourceFile && created.item?.id) {
-        try { await POST(`/api/v2/workflows/${encodeURIComponent(created.item.id)}/attachments`, { fileName: sourceFile.name, mimeType: stocktakeSourceMime(sourceFile), data: await readFileAsDataUrl(sourceFile) }); }
+        try { const mimeType = stocktakeSourceMime(sourceFile); await POST(`/api/v2/workflows/${encodeURIComponent(created.item.id)}/attachments`, { fileName: sourceFile.name, mimeType, data: await readFileAsDataUrl(sourceFile, mimeType) }); }
         catch (uploadError) { toast(ccText(`Request submitted, but the source spreadsheet could not be attached: ${uploadError.message}`, `申请已提交，但原始表格附件上传失败：${uploadError.message}`), 'error'); await renderControlCenter(root); return; }
       }
       toast(ccText('Request submitted', '申请已提交'), 'success'); await renderControlCenter(root);
@@ -903,9 +924,8 @@ async function renderControlCenter(root) {
   };
   const uploadStoreOperationFiles = async (kind, itemId, files) => {
     for (const file of files) {
-      const extension = file.name.split('.').pop().toLowerCase();
-      const mimeType = file.type || ({ pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg' }[extension] || 'application/octet-stream');
-      await POST(`/api/v2/store-operations/${kind}/${encodeURIComponent(itemId)}/attachments`, { fileName: file.name, mimeType, data: await readFileAsDataUrl(file) });
+      const mimeType = uploadMimeType(file);
+      await POST(`/api/v2/store-operations/${kind}/${encodeURIComponent(itemId)}/attachments`, { fileName: file.name, mimeType, data: await readFileAsDataUrl(file, mimeType) });
     }
   };
   const bindStoreOperationForm = (selector, kind, endpoint, successMessage) => {
@@ -967,7 +987,7 @@ async function renderControlCenter(root) {
     }
     try {
       await POST(`/api/v2/workflows/${encodeURIComponent(form.dataset.v2Resubmit)}/actions`, payload);
-      if (sourceFile) await POST(`/api/v2/workflows/${encodeURIComponent(form.dataset.v2Resubmit)}/attachments`, { fileName: sourceFile.name, mimeType: stocktakeSourceMime(sourceFile), data: await readFileAsDataUrl(sourceFile) });
+      if (sourceFile) { const mimeType = stocktakeSourceMime(sourceFile); await POST(`/api/v2/workflows/${encodeURIComponent(form.dataset.v2Resubmit)}/attachments`, { fileName: sourceFile.name, mimeType, data: await readFileAsDataUrl(sourceFile, mimeType) }); }
       toast(ccText('Request resubmitted', '申请已重新提交'), 'success'); await renderControlCenter(root);
     }
     catch (err) { toast(err.message, 'error'); }
@@ -1064,8 +1084,8 @@ async function renderControlCenter(root) {
   $$('[data-v2-attachment]', root).forEach(form => form.addEventListener('submit', async e => {
     e.preventDefault(); const fd = new FormData(form), file = fd.get('file'); if (!file || !file.size) return;
     try {
-      const data = await new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error(ccText('Could not read file', '无法读取文件'))); reader.readAsDataURL(file); });
-      const mimeType = file.type || (/\.xlsx$/i.test(file.name) ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : /\.csv$/i.test(file.name) ? 'text/csv' : 'application/octet-stream');
+      const mimeType = uploadMimeType(file);
+      const data = await readFileAsDataUrl(file, mimeType);
       await POST(`/api/v2/workflows/${encodeURIComponent(form.dataset.v2Attachment)}/attachments`, { fileName: file.name, mimeType, evidenceType: fd.get('evidenceType'), data });
       toast(ccText('Evidence uploaded', '凭证已上传'), 'success'); await renderControlCenter(root);
     } catch (err) { toast(err.message, 'error'); }
@@ -1074,10 +1094,9 @@ async function renderControlCenter(root) {
   $$('[data-task-comment-form]', root).forEach(form => form.addEventListener('submit', async e => { e.preventDefault(); const comment = new FormData(form).get('comment'); try { await POST(`/api/v2/tasks/${encodeURIComponent(form.dataset.taskCommentForm)}/comments`, { comment }); toast(ccText('Comment added', '备注已添加'), 'success'); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } }));
   $$('[data-task-attachment-form]', root).forEach(form => form.addEventListener('submit', async e => {
     e.preventDefault(); const file = new FormData(form).get('file'); if (!file || !file.size) return;
-    const extension = file.name.split('.').pop().toLowerCase();
-    const mimeType = file.type || ({ pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', csv: 'text/csv', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }[extension] || 'application/octet-stream');
+    const mimeType = uploadMimeType(file);
     try {
-      await POST(`/api/v2/tasks/${encodeURIComponent(form.dataset.taskAttachmentForm)}/attachments`, { fileName: file.name, mimeType, data: await readFileAsDataUrl(file) });
+      await POST(`/api/v2/tasks/${encodeURIComponent(form.dataset.taskAttachmentForm)}/attachments`, { fileName: file.name, mimeType, data: await readFileAsDataUrl(file, mimeType) });
       toast(ccText('Evidence uploaded', '完成凭证已上传'), 'success'); await renderControlCenter(root);
     } catch (err) { toast(err.message, 'error'); }
   }));

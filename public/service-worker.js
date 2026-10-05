@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'nss-control-shell-v';
-const CACHE = `${CACHE_PREFIX}17`;
+const CACHE = `${CACHE_PREFIX}20`;
 const SHELL = ['/', '/index.html', '/styles.css', '/app.js', '/xlsx.full.min.js', '/i18n.js', '/manifest.webmanifest', '/logo-brand.png', '/pwa-icon.svg'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
@@ -20,10 +20,11 @@ self.addEventListener('fetch', event => {
       }
       return response;
     } catch (error) {
-      const cached = await caches.match(request, { ignoreSearch: true });
+      const appCache = await caches.open(CACHE);
+      const cached = await appCache.match(request, { ignoreSearch: true });
       if (cached) return cached;
       if (request.mode === 'navigate') {
-        const shell = await caches.match('/');
+        const shell = await appCache.match('/');
         if (shell) return shell;
       }
       throw error;

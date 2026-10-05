@@ -1,11 +1,12 @@
 {
   "name": "solarpoints-app",
   "version": "1.0.0",
-  "description": "SolarPoints 会员积分系统 - 多门店实时同步",
+  "description": "NSS Solar 集团中控 V2 与独立旧会员积分模块",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
