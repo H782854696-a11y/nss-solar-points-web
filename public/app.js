@@ -384,6 +384,7 @@ function setScreen(name) {
   const legacyGroup = $('#legacyNavGroup');
   if (legacyGroup?.querySelector(`.nav-item[data-screen="${name}"]`)) legacyGroup.open = true;
   updateHeaderCrumb();
+  updateSyncChip();
   renderScreen();
 }
 
@@ -2919,10 +2920,10 @@ function updateSyncChip() {
   const chip = $('#syncChip');
   const txt = $('#syncChipText');
   if (!chip || !txt) return;
-  // 云同步是总部配置项，店长不显示顶栏状态；管理员则确保显示出来
-  // （账号在同一页面内切换时，display 需要能双向复位）
-  chip.style.display = can('sync.view') ? '' : 'none';
-  if (!can('sync.view')) return;
+  // 同步仅属于旧会员积分模块；集团中控及系统页面不显示其状态。
+  const inMemberPoints = Boolean($('#legacyNavGroup')?.querySelector(`.nav-item[data-screen="${state.screen}"]`));
+  chip.style.display = can('sync.view') && inMemberPoints ? '' : 'none';
+  if (!can('sync.view') || !inMemberPoints) return;
   chip.classList.remove('warn', 'err');
   const cfg = state.sheets || {};
   const rt = cfg.runtime || {};
