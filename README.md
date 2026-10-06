@@ -65,7 +65,7 @@ npm test
 
 生产域名为 `nss-solar-points.com`。既有部署记录指向 `/opt/solarpoints-v2/`（PM2 名称 `solarpoints-v2`，本机端口 3001），原会员积分应用使用独立的 `/opt/solarpoints/` 路径。以上是历史交接信息，本地源码不能证明当前生产状态。
 
-先用 `deploy/preflight-v2.sh nss-solar-v2` 只读核对服务器目录、数据、磁盘和进程。`deploy/deploy-v2.sh` 面向已存在的 V2 目录和数据目录，要求显式提供 SSH 目标，只从已提交的 Git 版本制作发布包，并在切换前备份和校验备份。2026-10-05 已完成一次失败自动回退和一次成功发布，当前公网前端版本 `v58`，PM2 从 `/opt/solarpoints-v2/current/server.js` 运行。发布脚本不能用于首次初始化，也不操作 `/opt/solarpoints/`。备份文件完整性已核对；仍需定期演练从备份恢复。此次未修改 DNS 或证书。
+先用 `deploy/preflight-v2.sh nss-solar-v2` 只读核对服务器目录、数据、磁盘和进程。`deploy/deploy-v2.sh` 面向已存在的 V2 目录和数据目录，要求显式提供 SSH 目标，只从已提交的 Git 版本制作发布包，并在切换前备份和校验备份。2026-10-05 已完成一次失败自动回退和一次成功发布，当前公网前端版本 `v59`，PM2 从 `/opt/solarpoints-v2/current/server.js` 运行。发布脚本不能用于首次初始化，也不操作 `/opt/solarpoints/`。备份文件完整性已核对；仍需定期演练从备份恢复。此次未修改 DNS 或证书。
 
 ## 常见问题
 

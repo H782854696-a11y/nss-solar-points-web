@@ -218,3 +218,10 @@ npm start
 - 此前文档中关于“XLSX 导入并解析一行”的页面验收属于 2026-10-05 旧版行为，现行实现不再解析导入行。
 - 本地全套 24 个测试文件、32 项测试通过（0 失败）；包括隔离 API 的任意表头 XLSX、原始字节下载、其他 Excel 扩展名和无文件/伪造文件拒绝。新功能尚需真实浏览器文件选择及业务岗位验收。
 - Git SHA、远端推送和生产发布状态见后续记录；不要仅凭此条推断已经上线。
+
+## 10. 2026-10-06 发布与安全核对（Asia/Manila）
+
+- 盘点原文件上传提交 `fb3a5741c3af9e6cc75a7ad2da9a31a021af4dad` 已推送并发布。发布时发现生产依赖 `proxy-addr@2.0.7` 有 1 项严重漏洞；随后修复登录限流的 IP 信任规则并将锁文件升级到 `proxy-addr@2.0.8`，提交 `ea59cdc8cca060d9f4aeccd57e3a502127be9c0b` 已推送并再次发布。
+- 最终 V2 发布目录：`/opt/solarpoints-v2/releases/release-20261006T125747Z`；发布前备份：`/opt/solarpoints-v2/backups/nss-solar-v2-release-20261006T125747Z.tar.gz`，已确认可完整读取。V2 PM2 在线，旧 `solarpoints` 进程仍为 stopped；旧 `/opt/solarpoints/` 未被发布脚本操作。
+- 公网 `/api/health` 返回 `ok: true`，首页加载 `app.js?v=59`，脚本包含任意 Excel 排版上传提示；未登录流程接口 HTTP 401。生产 `npm audit --omit=dev --audit-level=low` 显示 0 项已知漏洞，实际依赖 `proxy-addr` 为 2.0.8。备份中 26 个 V2 数据文件与发布后数据目录同名文件 SHA-256 全部一致，无缺失。
+- 本地完整回归 24 个测试文件、32 项测试通过，0 失败。真实浏览器选择用户自己的 Excel 文件、实际审批人下载及手机端使用仍待业务验收；不能把健康检查当作完整业务验收。
