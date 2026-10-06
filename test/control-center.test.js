@@ -32,6 +32,14 @@ test('stocktake validates rows and computes final count variance', () => {
   assert.equal(result.value.items[0].varianceReason, 'Damaged in transit');
 });
 
+test('a stocktake may use an attached spreadsheet without structured item rows', () => {
+  const form = { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Count review', items: [] };
+  assert.match(controlCenter.validateWorkflow('stocktake', form).error, /Excel/);
+  const result = controlCenter.validateWorkflow('stocktake', form, { allowEmptyStocktakeItems: true });
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.value.items, []);
+});
+
 test('stocktake rejects duplicates, unexplained variances, and more than 2,000 rows', () => {
   const base = validStocktake().form;
   const duplicate = { ...base, items: [...base.items, { ...base.items[0], itemCode: 'pv-001', location: 'a-01' }] };

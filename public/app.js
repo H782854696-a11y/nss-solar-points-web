@@ -455,91 +455,6 @@ const CONTROL_FIELDS_BY_TYPE = {
 const ccText = (en, zh) => String(locale()).toLowerCase().startsWith('zh') ? zh : en;
 const ccStatus = s => ({ pending_approval: ccText('Pending approval', '待审批'), approved: ccText('Approved', '已批准'), rejected: ccText('Rejected', '已驳回'), returned: ccText('Returned for changes', '退回修改'), execution_pending: ccText('Execution in progress', '整改中'), awaiting_review: ccText('Awaiting review', '待复查'), completed: ccText('Completed', '已完成'), cancelled: ccText('Cancelled', '已撤回'), open: ccText('Open', '待处理'), in_progress: ccText('In progress', '进行中') }[s] || s);
 
-function parseDelimitedCsvTable(text) {
-  const source = String(text || '').replace(/^\uFEFF/, '');
-  const firstLine = source.split(/\r?\n/, 1)[0];
-  const delimiterCounts = { ',': 0, ';': 0, '\t': 0 };
-  let quoted = false;
-  for (let i = 0; i < firstLine.length; i += 1) {
-    if (firstLine[i] === '"' && firstLine[i + 1] === '"' && quoted) { i += 1; continue; }
-    if (firstLine[i] === '"') quoted = !quoted;
-    else if (!quoted && Object.prototype.hasOwnProperty.call(delimiterCounts, firstLine[i])) delimiterCounts[firstLine[i]] += 1;
-  }
-  const delimiter = Object.entries(delimiterCounts).sort((a, b) => b[1] - a[1])[0][0];
-  const table = []; let row = [], value = '', inQuotes = false;
-  for (let i = 0; i < source.length; i += 1) {
-    const ch = source[i];
-    if (inQuotes) {
-      if (ch === '"' && source[i + 1] === '"') { value += '"'; i += 1; }
-      else if (ch === '"') inQuotes = false;
-      else value += ch;
-    } else if (ch === '"' && value === '') inQuotes = true;
-    else if (ch === delimiter) { row.push(value); value = ''; }
-    else if (ch === '\n' || ch === '\r') {
-      if (ch === '\r' && source[i + 1] === '\n') i += 1;
-      row.push(value); value = '';
-      if (row.some(cell => String(cell).trim() !== '')) table.push(row);
-      row = [];
-    } else value += ch;
-  }
-  row.push(value); if (row.some(cell => String(cell).trim() !== '')) table.push(row);
-  if (inQuotes) throw new Error(ccText('CSV contains an unfinished quoted field', 'CSV 文件有未闭合的引号'));
-  return table;
-}
-
-function parseStocktakeCsv(text) { return parseStocktakeTable(parseDelimitedCsvTable(text)); }
-
-function parseStocktakeTable(table) {
-  if (table.length < 2) throw new Error(ccText('The first worksheet must include a header and at least one item', '第一个工作表需要表头及至少一条商品明细'));
-  const key = value => String(value || '').trim().toLowerCase().replace(/[\s_\-()（）]/g, '');
-  const aliases = {
-    itemCode: ['itemcode','sku','productcode','code','商品编码','产品编码','sku编码'],
-    itemName: ['itemname','productname','name','商品名称','产品名称','品名'],
-    location: ['location','bin','binlocation','库位','货位','仓位'],
-    systemQuantity: ['systemquantity','bookquantity','账面数量','系统数量','账存数量'],
-    countedQuantity: ['countedquantity','actualquantity','countquantity','实盘数量','盘点数量','实际数量'],
-    recountedQuantity: ['recountedquantity','recheckquantity','secondcountquantity','复盘数量','复核数量'],
-    varianceReason: ['variancereason','differencereason','差异原因','盘点差异说明'],
-    remark: ['remark','note','备注','说明'],
-  };
-  const header = table[0].map(key);
-  const columns = Object.fromEntries(Object.entries(aliases).map(([field, names]) => [field, header.findIndex(h => names.includes(h))]));
-  if (columns.itemCode < 0 || columns.countedQuantity < 0) throw new Error(ccText('Required columns: itemCode and countedQuantity', '表格至少要有“商品编码”和“实盘数量”两列'));
-  const rows = [];
-  for (const cells of table.slice(1)) {
-    if (rows.length >= 2000) throw new Error(ccText('A stocktake can contain up to 2,000 lines', '每张盘点单最多导入 2,000 行'));
-    const get = field => columns[field] >= 0 ? String(cells[columns[field]] ?? '').trim() : '';
-    const row = { itemCode: get('itemCode'), itemName: get('itemName'), location: get('location'), systemQuantity: get('systemQuantity'), countedQuantity: get('countedQuantity'), recountedQuantity: get('recountedQuantity'), varianceReason: get('varianceReason'), remark: get('remark') };
-    if (!row.itemCode && !row.countedQuantity && !row.itemName) continue;
-    if (!row.itemCode || row.countedQuantity === '') throw new Error(ccText('Each line needs an item code and counted quantity', '每行都必须填写商品编码和实盘数量'));
-    for (const field of ['systemQuantity','countedQuantity','recountedQuantity']) {
-      if (row[field] !== '' && !/^(?:\d+(?:\.\d*)?|\.\d+)$/.test(row[field])) throw new Error(ccText(`Invalid number on line ${rows.length + 2}`, `第 ${rows.length + 2} 行数量格式无效`));
-    }
-    rows.push(row);
-  }
-  if (!rows.length) throw new Error(ccText('No stocktake lines found', '没有可导入的盘点明细'));
-  return rows;
-}
-
-async function parseStocktakeFile(file) {
-  if (/\.xlsx$/i.test(file.name)) {
-    if (!window.XLSX) throw new Error(ccText('Excel import is not available. Reload the page and try again.', 'Excel 导入组件尚未加载，请刷新页面后重试'));
-    let workbook;
-    try { workbook = window.XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: false, sheetRows: 2002 }); }
-    catch { throw new Error(ccText('Could not read this Excel workbook. Save it as a standard .xlsx file and try again.', '无法读取该 Excel 文件，请另存为标准 .xlsx 格式后重试')); }
-    const firstSheet = workbook.SheetNames[0];
-    if (!firstSheet) throw new Error(ccText('The workbook has no worksheets', '工作簿中没有工作表'));
-    const sheet = workbook.Sheets[firstSheet];
-    if (!sheet || !sheet['!ref']) throw new Error(ccText('The first worksheet is empty', '第一个工作表为空'));
-    const range = window.XLSX.utils.decode_range(sheet['!ref']);
-    if (range.e.c > 50) throw new Error(ccText('The worksheet has too many columns', '工作表列数过多'));
-    const table = window.XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false, blankrows: false });
-    return parseStocktakeTable(table);
-  }
-  if (/\.csv$/i.test(file.name)) return parseStocktakeCsv(await file.text());
-  throw new Error(ccText('Choose an .xlsx or .csv file', '请选择 .xlsx 或 .csv 文件'));
-}
-
 function stocktakeCsv(items = []) {
   const columns = [
     ['itemCode', '商品编码'], ['itemName', '商品名称'], ['location', '库位'],
@@ -556,22 +471,8 @@ function stocktakeCsv(items = []) {
   }).join(',')).join('\r\n')}`;
 }
 
-function downloadStocktakeXlsx(items = [], filename = 'NSS-Solar-stocktake-template.xlsx') {
-  if (!window.XLSX) { toast(ccText('Excel component is not available. Reload the page and try again.', 'Excel 组件尚未加载，请刷新页面后重试'), 'error'); return; }
-  const headers = ['商品编码', '商品名称', '库位', '账面数量', '实盘数量', '复盘数量', '差异数量', '差异原因', '备注'];
-  const rows = items.map(row => {
-    const system = row.systemQuantity == null || row.systemQuantity === '' ? null : Number(row.systemQuantity);
-    const actual = row.recountedQuantity == null || row.recountedQuantity === '' ? Number(row.countedQuantity) : Number(row.recountedQuantity);
-    const difference = system == null || !Number.isFinite(system) || !Number.isFinite(actual) ? '' : Math.round((actual - system) * 1000000) / 1000000;
-    return [row.itemCode || '', row.itemName || '', row.location || '', row.systemQuantity ?? '', row.countedQuantity ?? '', row.recountedQuantity ?? '', difference, row.varianceReason || '', row.remark || ''];
-  });
-  const workbook = window.XLSX.utils.book_new();
-  window.XLSX.utils.book_append_sheet(workbook, window.XLSX.utils.aoa_to_sheet([headers, ...rows]), '盘点明细');
-  window.XLSX.writeFile(workbook, filename, { compression: true });
-}
-
 function stocktakeSourceMime(file) {
-  return /\.xlsx$/i.test(file.name) ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' : 'text/csv';
+  return ({ xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel', xlsm: 'application/vnd.ms-excel.sheet.macroenabled.12', xlsb: 'application/vnd.ms-excel.sheet.binary.macroenabled.12', csv: 'text/csv' })[String(file.name || '').split('.').pop().toLowerCase()];
 }
 
 function downloadStocktakeCsv(items, filename) {
@@ -583,7 +484,7 @@ function downloadStocktakeCsv(items, filename) {
 
 function uploadMimeType(file) {
   const extension = String(file.name || '').split('.').pop().toLowerCase();
-  return ({ pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', csv: 'text/csv', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' }[extension] || file.type || 'application/octet-stream');
+  return ({ pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', csv: 'text/csv', xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', xls: 'application/vnd.ms-excel', xlsm: 'application/vnd.ms-excel.sheet.macroenabled.12', xlsb: 'application/vnd.ms-excel.sheet.binary.macroenabled.12' }[extension] || file.type || 'application/octet-stream');
 }
 
 function readFileAsDataUrl(file, mimeType) {
@@ -599,7 +500,7 @@ function readFileAsDataUrl(file, mimeType) {
   });
 }
 
-function createStocktakeEditor(container, initialRows = []) {
+function createStocktakeEditor(container, initialRows = [], initialSourceName = '') {
   if (!container) return null;
   const pageSize = 100; let rows = Array.isArray(initialRows) ? initialRows.map(x => ({ ...x })) : [];
   let page = 0, sourceFile = null, error = '';
@@ -616,18 +517,18 @@ function createStocktakeEditor(container, initialRows = []) {
     const shown = rows.slice(page * pageSize, (page + 1) * pageSize);
     container.innerHTML = `
       <div class="cc-stocktake-toolbar">
-        <strong>${ccText('Stocktake lines', '盘点明细')} <span data-stocktake-count>(${rows.length})</span></strong>
+        <strong>${ccText('Stocktake spreadsheet', '盘点表格')}</strong>
         <div class="cc-actions">
-          <button type="button" class="btn btn-sm" data-stocktake-xlsx-template>${ccText('Download Excel template', '下载 Excel 模板')}</button>
-          <button type="button" class="btn btn-sm" data-stocktake-template>${ccText('Download CSV template', '下载 CSV 模板')}</button>
-          <label class="btn btn-sm cc-stocktake-file">${ccText('Import Excel / CSV', '导入 Excel / CSV')}<input type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,.csv,text/csv" data-stocktake-file hidden/></label>
-          <button type="button" class="btn btn-sm" data-stocktake-add>${ccText('Add line', '添加一行')}</button>
+          <label class="btn btn-sm cc-stocktake-file">${ccText('Upload Excel / CSV', '上传 Excel / CSV')}<input type="file" accept=".xlsx,.xls,.xlsm,.xlsb,.csv" data-stocktake-file hidden/></label>
+          <button type="button" class="btn btn-sm" data-stocktake-add>${ccText('Add optional line', '手动添加明细')}</button>
         </div>
       </div>
-      <div class="cc-meta">${ccText('Use the first worksheet. Required columns: item code and counted quantity. Optional columns include recount quantity and variance reason. The original Excel/CSV file will be attached to the request.', '导入第一个工作表；必填列为商品编码和实盘数量，可选复盘数量和差异原因。原始 Excel / CSV 文件会作为申请附件保存。')}</div>
+      <div class="cc-meta">${ccText('Any Excel layout is accepted. The original file is attached without reading its rows; approvers can download it. Maximum 10 MB. Manual lines are optional.', '任意 Excel 排版均可，系统不读取表格内容；原文件随申请保存，审批人可下载查看。单文件不超过 10MB；手动明细可选。')}</div>
+      ${(sourceFile || initialSourceName) ? `<div class="cc-meta">${ccText('Selected file', '已选表格')}: ${escapeHtml(sourceFile?.name || initialSourceName)}${!sourceFile && initialSourceName ? ` · ${ccText('Already attached', '已作为附件保存')}` : ''}</div>` : ''}
+      ${rows.length ? `<div class="cc-meta">${ccText('Optional manual lines', '可选手动明细')} (${rows.length})</div>` : ''}
       <div class="cc-meta" data-stocktake-error role="alert">${escapeHtml(error)}</div>
-      <div class="cc-stocktake-scroll"><table class="cc-stocktake-table"><thead><tr><th>${ccText('Item code*', '商品编码*')}</th><th>${ccText('Item name', '商品名称')}</th><th>${ccText('Bin', '库位')}</th><th>${ccText('Book qty', '账面数量')}</th><th>${ccText('Counted qty*', '实盘数量*')}</th><th>${ccText('Recount qty', '复盘数量')}</th><th>${ccText('Difference', '差异数量')}</th><th>${ccText('Variance reason', '差异原因')}</th><th>${ccText('Remark', '备注')}</th><th></th></tr></thead><tbody>${shown.length ? shown.map((row, i) => { const idx = page * pageSize + i; return `<tr><td><input data-stocktake-row="${idx}" data-stocktake-field="itemCode" value="${escapeHtml(row.itemCode || '')}" maxlength="80"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="itemName" value="${escapeHtml(row.itemName || '')}" maxlength="180"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="location" value="${escapeHtml(row.location || '')}" maxlength="80"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="systemQuantity" value="${escapeHtml(row.systemQuantity ?? '')}" inputmode="decimal"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="countedQuantity" value="${escapeHtml(row.countedQuantity ?? '')}" inputmode="decimal"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="recountedQuantity" value="${escapeHtml(row.recountedQuantity ?? '')}" inputmode="decimal"/></td><td><span class="cc-stocktake-difference">${escapeHtml(differenceFor(row))}</span></td><td><input data-stocktake-row="${idx}" data-stocktake-field="varianceReason" value="${escapeHtml(row.varianceReason || '')}" maxlength="500"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="remark" value="${escapeHtml(row.remark || '')}" maxlength="500"/></td><td><button type="button" class="btn btn-sm btn-danger" data-stocktake-remove="${idx}" aria-label="${ccText('Remove line', '删除行')}">×</button></td></tr>`; }).join('') : `<tr><td colspan="10" class="cc-stocktake-empty">${ccText('Import an Excel or CSV file, or add a line to begin.', '请导入 Excel 或 CSV 表格，或手动添加盘点明细。')}</td></tr>`}</tbody></table></div>
-      <div class="cc-stocktake-pager"><span>${ccText(`Page ${page + 1} of ${pages}`, `第 ${page + 1} / ${pages} 页`)}</span><div class="cc-actions"><button type="button" class="btn btn-sm" data-stocktake-prev ${page <= 0 ? 'disabled' : ''}>‹</button><button type="button" class="btn btn-sm" data-stocktake-next ${page >= pages - 1 ? 'disabled' : ''}>›</button></div></div>`;
+      <div class="cc-stocktake-scroll" ${rows.length ? '' : 'hidden'}><table class="cc-stocktake-table"><thead><tr><th>${ccText('Item code*', '商品编码*')}</th><th>${ccText('Item name', '商品名称')}</th><th>${ccText('Bin', '库位')}</th><th>${ccText('Book qty', '账面数量')}</th><th>${ccText('Counted qty*', '实盘数量*')}</th><th>${ccText('Recount qty', '复盘数量')}</th><th>${ccText('Difference', '差异数量')}</th><th>${ccText('Variance reason', '差异原因')}</th><th>${ccText('Remark', '备注')}</th><th></th></tr></thead><tbody>${shown.length ? shown.map((row, i) => { const idx = page * pageSize + i; return `<tr><td><input data-stocktake-row="${idx}" data-stocktake-field="itemCode" value="${escapeHtml(row.itemCode || '')}" maxlength="80"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="itemName" value="${escapeHtml(row.itemName || '')}" maxlength="180"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="location" value="${escapeHtml(row.location || '')}" maxlength="80"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="systemQuantity" value="${escapeHtml(row.systemQuantity ?? '')}" inputmode="decimal"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="countedQuantity" value="${escapeHtml(row.countedQuantity ?? '')}" inputmode="decimal"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="recountedQuantity" value="${escapeHtml(row.recountedQuantity ?? '')}" inputmode="decimal"/></td><td><span class="cc-stocktake-difference">${escapeHtml(differenceFor(row))}</span></td><td><input data-stocktake-row="${idx}" data-stocktake-field="varianceReason" value="${escapeHtml(row.varianceReason || '')}" maxlength="500"/></td><td><input data-stocktake-row="${idx}" data-stocktake-field="remark" value="${escapeHtml(row.remark || '')}" maxlength="500"/></td><td><button type="button" class="btn btn-sm btn-danger" data-stocktake-remove="${idx}" aria-label="${ccText('Remove line', '删除行')}">×</button></td></tr>`; }).join('') : `<tr><td colspan="10" class="cc-stocktake-empty">${ccText('Upload a spreadsheet above, or add manual lines if needed.', '可直接上传上方表格；需要时也可手动添加明细。')}</td></tr>`}</tbody></table></div>
+      <div class="cc-stocktake-pager" ${rows.length ? '' : 'hidden'}><span>${ccText(`Page ${page + 1} of ${pages}`, `第 ${page + 1} / ${pages} 页`)}</span><div class="cc-actions"><button type="button" class="btn btn-sm" data-stocktake-prev ${page <= 0 ? 'disabled' : ''}>‹</button><button type="button" class="btn btn-sm" data-stocktake-next ${page >= pages - 1 ? 'disabled' : ''}>›</button></div></div>`;
   };
   container.addEventListener('input', event => {
     const input = event.target.closest('[data-stocktake-row][data-stocktake-field]'); if (!input) return;
@@ -637,9 +538,7 @@ function createStocktakeEditor(container, initialRows = []) {
   });
   container.addEventListener('click', event => {
     const button = event.target.closest('button'); if (!button) return;
-    if (button.hasAttribute('data-stocktake-xlsx-template')) downloadStocktakeXlsx();
-    else if (button.hasAttribute('data-stocktake-template')) downloadStocktakeCsv([], 'NSS-Solar-stocktake-template.csv');
-    else if (button.hasAttribute('data-stocktake-add')) { if (rows.length >= 2000) { setError(ccText('A stocktake can contain up to 2,000 lines.', '每张盘点单最多 2,000 行。')); return; } const insertAt = Math.min((page + 1) * pageSize, rows.length); rows.splice(insertAt, 0, { itemCode: '', itemName: '', location: '', systemQuantity: '', countedQuantity: '', recountedQuantity: '', varianceReason: '', remark: '' }); page = Math.floor(insertAt / pageSize); render(); }
+    if (button.hasAttribute('data-stocktake-add')) { if (rows.length >= 2000) { setError(ccText('A stocktake can contain up to 2,000 manual lines.', '每张盘点单最多手动添加 2,000 行。')); return; } const insertAt = Math.min((page + 1) * pageSize, rows.length); rows.splice(insertAt, 0, { itemCode: '', itemName: '', location: '', systemQuantity: '', countedQuantity: '', recountedQuantity: '', varianceReason: '', remark: '' }); page = Math.floor(insertAt / pageSize); render(); }
     else if (button.hasAttribute('data-stocktake-remove')) { rows.splice(Number(button.dataset.stocktakeRemove), 1); render(); }
     else if (button.hasAttribute('data-stocktake-prev')) { page = Math.max(0, page - 1); render(); }
     else if (button.hasAttribute('data-stocktake-next')) { page = Math.min(Math.ceil(rows.length / pageSize) - 1, page + 1); render(); }
@@ -647,11 +546,9 @@ function createStocktakeEditor(container, initialRows = []) {
   container.addEventListener('change', async event => {
     const input = event.target.closest('[data-stocktake-file]'); if (!input || !input.files?.[0]) return;
     const file = input.files[0];
-    if (file.size > 4 * 1024 * 1024) { sourceFile = null; setError(ccText('The file must be no larger than 4 MB.', '文件不能超过 4 MB。')); input.value = ''; return; }
-    try {
-      const imported = await parseStocktakeFile(file);
-      sourceFile = file; rows = imported; page = 0; setError(''); render();
-    } catch (err) { sourceFile = null; setError(err.message); input.value = ''; }
+    if (!stocktakeSourceMime(file)) { setError(ccText('Choose an Excel or CSV file.', '请选择 Excel 或 CSV 文件。')); input.value = ''; return; }
+    if (!file.size || file.size > 10 * 1024 * 1024) { setError(ccText('The file must be between 1 byte and 10 MB.', '文件大小须在 1 字节至 10MB 之间。')); input.value = ''; return; }
+    sourceFile = file; rows = []; page = 0; setError(''); render();
   });
   render();
   return {
@@ -760,12 +657,12 @@ async function renderControlCenter(root) {
     <article class="card cc-card" data-workflow-card data-workflow-status="${escapeHtml(w.status)}" data-workflow-type="${escapeHtml(w.type)}" data-workflow-search="${escapeHtml([w.title, w.createdByName, w.assigneeName, w.form?.storeName, w.form?.warehouseName, w.form?.issue, w.externalDocumentNumber].filter(Boolean).join(' '))}">
       <div class="cc-card-top"><strong>${escapeHtml(CONTROL_TYPES[w.type]?.[String(locale()).toLowerCase().startsWith('zh') ? 1 : 0] || w.type)} · ${escapeHtml(w.title)}</strong><span class="cc-status">${escapeHtml(ccStatus(w.status))}</span></div>
       <div class="cc-meta">${escapeHtml(w.createdByName)} · ${escapeHtml(new Date(w.createdAt).toLocaleString())}${w.approvalDueAt && w.status === 'pending_approval' ? ` · ${ccText('Approval due', '审批时限')}: ${escapeHtml(new Date(w.approvalDueAt).toLocaleString())}` : ''}${w.externalDocumentNumber ? ` · ${ccText('External ref', '外部单据号')}: ${escapeHtml(w.externalDocumentNumber)}` : ''}${w.assigneeName ? ` · ${ccText('Responsible', '整改负责人')}: ${escapeHtml(w.assigneeName)}` : ''}</div>
-      <div class="cc-meta">${Object.entries(w.form || {}).filter(([key, value]) => key !== 'items' && value != null && String(value).trim() !== '').map(([key, value]) => `${escapeHtml(({warehouseName:'仓库',batchNumber:'批次',countArea:'区域',counterName:'盘点人',countDate:'盘点日期',storeName:'门店',issue:'问题',dueDate:'整改期限',reason:'说明'})[key] || key)}: ${escapeHtml(value)}`).join(' · ')}</div>
-      ${w.type === 'stocktake' && Array.isArray(w.form?.items) ? `<details class="cc-history"><summary>${ccText('Review stocktake lines', '查看盘点明细')} (${w.form.items.length})</summary><div class="cc-stocktake-scroll"><table class="cc-stocktake-table"><thead><tr><th>${ccText('Item code', '商品编码')}</th><th>${ccText('Item name', '商品名称')}</th><th>${ccText('Bin', '库位')}</th><th>${ccText('Book', '账面')}</th><th>${ccText('Counted', '实盘')}</th><th>${ccText('Recount', '复盘')}</th><th>${ccText('Difference', '差异')}</th><th>${ccText('Reason', '原因')}</th><th>${ccText('Remark', '备注')}</th></tr></thead><tbody>${w.form.items.slice(0, 20).map(item => `<tr><td>${escapeHtml(item.itemCode || '')}</td><td>${escapeHtml(item.itemName || '')}</td><td>${escapeHtml(item.location || '')}</td><td>${escapeHtml(item.systemQuantity ?? '—')}</td><td>${escapeHtml(item.countedQuantity ?? '—')}</td><td>${escapeHtml(item.recountedQuantity ?? '—')}</td><td>${escapeHtml(stocktakeDifference(item))}</td><td>${escapeHtml(item.varianceReason || '')}</td><td>${escapeHtml(item.remark || '')}</td></tr>`).join('')}</tbody></table></div>${w.form.items.length > 20 ? `<div class="cc-meta">${ccText('First 20 lines are shown; download the full list.', '此处显示前 20 行，可下载完整明细。')}</div>` : ''}<button type="button" class="btn btn-sm" data-stocktake-export="${escapeHtml(w.id)}">${ccText('Download detail CSV', '下载完整盘点明细')}</button></details>` : ''}
+      <div class="cc-meta">${Object.entries(w.form || {}).filter(([key, value]) => key !== 'items' && value != null && String(value).trim() !== '').map(([key, value]) => `${escapeHtml(({warehouseName:'仓库',batchNumber:'批次',countArea:'区域',counterName:'盘点人',countDate:'盘点日期',sourceFileName:'盘点表格',storeName:'门店',issue:'问题',dueDate:'整改期限',reason:'说明'})[key] || key)}: ${escapeHtml(value)}`).join(' · ')}</div>
+      ${w.type === 'stocktake' && Array.isArray(w.form?.items) && w.form.items.length ? `<details class="cc-history"><summary>${ccText('Review stocktake lines', '查看盘点明细')} (${w.form.items.length})</summary><div class="cc-stocktake-scroll"><table class="cc-stocktake-table"><thead><tr><th>${ccText('Item code', '商品编码')}</th><th>${ccText('Item name', '商品名称')}</th><th>${ccText('Bin', '库位')}</th><th>${ccText('Book', '账面')}</th><th>${ccText('Counted', '实盘')}</th><th>${ccText('Recount', '复盘')}</th><th>${ccText('Difference', '差异')}</th><th>${ccText('Reason', '原因')}</th><th>${ccText('Remark', '备注')}</th></tr></thead><tbody>${w.form.items.slice(0, 20).map(item => `<tr><td>${escapeHtml(item.itemCode || '')}</td><td>${escapeHtml(item.itemName || '')}</td><td>${escapeHtml(item.location || '')}</td><td>${escapeHtml(item.systemQuantity ?? '—')}</td><td>${escapeHtml(item.countedQuantity ?? '—')}</td><td>${escapeHtml(item.recountedQuantity ?? '—')}</td><td>${escapeHtml(stocktakeDifference(item))}</td><td>${escapeHtml(item.varianceReason || '')}</td><td>${escapeHtml(item.remark || '')}</td></tr>`).join('')}</tbody></table></div>${w.form.items.length > 20 ? `<div class="cc-meta">${ccText('First 20 lines are shown; download the full list.', '此处显示前 20 行，可下载完整明细。')}</div>` : ''}<button type="button" class="btn btn-sm" data-stocktake-export="${escapeHtml(w.id)}">${ccText('Download detail CSV', '下载完整盘点明细')}</button></details>` : ''}
       ${(w.comments || []).length ? `<details class="cc-history" open><summary>${ccText('Comments', '协作备注')} (${w.comments.length})</summary>${w.comments.map(c => `<div class="cc-meta"><strong>${escapeHtml(c.actorName || '')}</strong> · ${escapeHtml(new Date(c.createdAt).toLocaleString())}<div>${escapeHtml(c.comment || '')}</div></div>`).join('')}</details>` : ''}
       ${(w.attachments || []).length ? `<div class="cc-history"><strong>${ccText('Attachments', '凭证附件')}</strong>${w.attachments.map(a => `<div class="cc-meta"><a href="/api/v2/workflows/${encodeURIComponent(w.id)}/attachments/${encodeURIComponent(a.id)}/download">${escapeHtml(a.name)}</a> · ${escapeHtml(({before:'整改前',after:'整改后',supporting:'其他凭证'})[a.evidenceType || 'supporting'] || '')}${a.executionRound ? ` · ${ccText('Round', '第')} ${escapeHtml(a.executionRound)} ${ccText('evidence', '轮凭证')}` : ''} · ${Math.ceil(Number(a.size || 0) / 1024)} KB</div>`).join('')}</div>` : ''}
       ${w.type === 'store_remediation' && ['approved','execution_pending','awaiting_review'].includes(w.status) ? `<div class="cc-meta">${ccText('Upload both before and after evidence before submitting this remediation for review.', '整改提交复查前，需要同时上传整改前和整改后凭证。')}</div>` : ''}
-      ${ACTIVE_CONTROL_TYPES[w.type] && !['rejected','cancelled','completed'].includes(w.status) && canDiscussWorkflow ? `<div class="cc-form-grid"><form data-v2-comment="${escapeHtml(w.id)}" class="cc-inline-form"><input name="comment" required maxlength="2000" placeholder="${ccText('Add a process comment', '添加流程备注')}"/><button class="btn btn-sm">${ccText('Comment', '备注')}</button></form><form data-v2-attachment="${escapeHtml(w.id)}" class="cc-inline-form">${w.type === 'store_remediation' ? `<select name="evidenceType">${evidenceTypeOptions}</select>` : `<input type="hidden" name="evidenceType" value="supporting"/>`}<input name="file" type="file" accept="application/pdf,image/png,image/jpeg,.csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required/><button class="btn btn-sm">${w.type === 'store_remediation' ? ccText('Upload evidence', '上传凭证') : ccText('Upload attachment', '上传附件')}</button></form></div>` : ''}
+      ${ACTIVE_CONTROL_TYPES[w.type] && !['rejected','cancelled','completed'].includes(w.status) && canDiscussWorkflow ? `<div class="cc-form-grid"><form data-v2-comment="${escapeHtml(w.id)}" class="cc-inline-form"><input name="comment" required maxlength="2000" placeholder="${ccText('Add a process comment', '添加流程备注')}"/><button class="btn btn-sm">${ccText('Comment', '备注')}</button></form><form data-v2-attachment="${escapeHtml(w.id)}" class="cc-inline-form">${w.type === 'store_remediation' ? `<select name="evidenceType">${evidenceTypeOptions}</select>` : `<input type="hidden" name="evidenceType" value="supporting"/>`}<input name="file" type="file" accept="application/pdf,image/png,image/jpeg,.csv,.xlsx,.xls,.xlsm,.xlsb" required/><button class="btn btn-sm">${w.type === 'store_remediation' ? ccText('Upload evidence', '上传凭证') : ccText('Upload attachment', '上传附件')}</button></form></div>` : ''}
       ${(w.history || []).length ? `<details class="cc-history"><summary>${ccText('Approval sign-off and history', '审批签署与流程记录')}</summary>${w.history.map(h => `<div class="cc-meta"><strong>${escapeHtml(h.actorName || '')}</strong> · ${escapeHtml(({submit:'已提交',approve:'已审批',reject:'已驳回',return:'已退回',delegate:'已转交审批',execution:'已登记执行',review_pass:'复查通过',review_return:'退回整改',cancel:'已撤回',resubmit:'重新提交',comment:'添加备注','assignee.update':'调整负责人'})[h.action] || h.action)} · ${escapeHtml(new Date(h.createdAt).toLocaleString())}${h.note ? ` · ${escapeHtml(h.note)}` : ''}</div>`).join('')}</details>` : ''}
       <div class="cc-actions">
         ${ACTIVE_CONTROL_TYPES[w.type] && isCurrentApprover ? `<button class="btn btn-sm" data-v2-action="approve" data-v2-id="${escapeHtml(w.id)}">${ccText('Approve', '批准')}</button><button class="btn btn-sm" data-v2-action="return" data-v2-id="${escapeHtml(w.id)}">${ccText('Return for edits', '退回修改')}</button><button class="btn btn-sm btn-danger" data-v2-action="reject" data-v2-id="${escapeHtml(w.id)}">${ccText('Reject', '驳回')}</button>` : ''}
@@ -786,7 +683,7 @@ async function renderControlCenter(root) {
     const isOpen = !['completed','cancelled'].includes(x.status);
     const checklistHtml = checklist.length ? `<div class="cc-task-checklist"><div class="cc-meta">${ccText('Checklist progress', '清单进度')}: ${completedCount}/${checklist.length}</div>${checklist.map(entry => `<label class="cc-task-check"><input type="checkbox" data-task-checklist="${escapeHtml(x.id)}" data-task-check-id="${escapeHtml(entry.id)}" ${entry.completed ? 'checked' : ''} ${!can('task.close') || !isOpen ? 'disabled' : ''}/><span class="${entry.completed ? 'is-complete' : ''}">${escapeHtml(entry.title)}${entry.completedAt ? `<small>${escapeHtml(entry.completedByName || '')} · ${escapeHtml(new Date(entry.completedAt).toLocaleString())}</small>` : ''}</span></label>`).join('')}</div>` : '';
     const completionBlocked = checklist.length > completedCount;
-    const activityHtml = `<div class="cc-task-activity">${comments.length ? `<details class="cc-history"><summary>${ccText('Task comments', '任务备注')} (${comments.length})</summary>${comments.slice(-10).map(c => `<div class="cc-meta"><strong>${escapeHtml(c.actorName || '')}</strong> · ${escapeHtml(new Date(c.createdAt).toLocaleString())}<div>${escapeHtml(c.comment || '')}</div></div>`).join('')}</details>` : ''}${attachments.length ? `<details class="cc-history"><summary>${ccText('Completion evidence', '完成凭证')} (${attachments.length})</summary>${attachments.map(a => `<div class="cc-meta"><a href="/api/v2/tasks/${encodeURIComponent(x.id)}/attachments/${encodeURIComponent(a.id)}/download">${escapeHtml(a.name)}</a> · ${Math.ceil(Number(a.size || 0) / 1024)} KB · ${escapeHtml(a.uploadedByName || '')}</div>`).join('')}</details>` : ''}${(can('task.close') || can('task.edit')) && isOpen ? `<div class="cc-form-grid"><form data-task-comment-form="${escapeHtml(x.id)}" class="cc-inline-form"><input name="comment" required maxlength="2000" placeholder="${ccText('Add a task comment', '添加任务备注')}"/><button class="btn btn-sm">${ccText('Comment', '备注')}</button></form><form data-task-attachment-form="${escapeHtml(x.id)}" class="cc-inline-form"><input name="file" type="file" accept="application/pdf,image/png,image/jpeg,.csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" required/><button class="btn btn-sm">${ccText('Upload completion evidence', '上传完成凭证')}</button></form></div>` : ''}</div>`;
+    const activityHtml = `<div class="cc-task-activity">${comments.length ? `<details class="cc-history"><summary>${ccText('Task comments', '任务备注')} (${comments.length})</summary>${comments.slice(-10).map(c => `<div class="cc-meta"><strong>${escapeHtml(c.actorName || '')}</strong> · ${escapeHtml(new Date(c.createdAt).toLocaleString())}<div>${escapeHtml(c.comment || '')}</div></div>`).join('')}</details>` : ''}${attachments.length ? `<details class="cc-history"><summary>${ccText('Completion evidence', '完成凭证')} (${attachments.length})</summary>${attachments.map(a => `<div class="cc-meta"><a href="/api/v2/tasks/${encodeURIComponent(x.id)}/attachments/${encodeURIComponent(a.id)}/download">${escapeHtml(a.name)}</a> · ${Math.ceil(Number(a.size || 0) / 1024)} KB · ${escapeHtml(a.uploadedByName || '')}</div>`).join('')}</details>` : ''}${(can('task.close') || can('task.edit')) && isOpen ? `<div class="cc-form-grid"><form data-task-comment-form="${escapeHtml(x.id)}" class="cc-inline-form"><input name="comment" required maxlength="2000" placeholder="${ccText('Add a task comment', '添加任务备注')}"/><button class="btn btn-sm">${ccText('Comment', '备注')}</button></form><form data-task-attachment-form="${escapeHtml(x.id)}" class="cc-inline-form"><input name="file" type="file" accept="application/pdf,image/png,image/jpeg,.csv,.xlsx,.xls,.xlsm,.xlsb" required/><button class="btn btn-sm">${ccText('Upload completion evidence', '上传完成凭证')}</button></form></div>` : ''}</div>`;
     return `<article class="card cc-card" data-task-card data-task-status="${escapeHtml(x.status)}" data-task-priority="${escapeHtml(x.priority || 'normal')}" data-task-store="${escapeHtml(x.storeId || '')}" data-task-search="${escapeHtml([x.title, x.description || '', x.assigneeName || ''].join(' '))}"><div class="cc-card-top"><strong>${escapeHtml(x.title)}</strong><span class="cc-status">${escapeHtml(ccStatus(x.status))}</span></div><div class="cc-meta">${escapeHtml(x.assigneeName || '—')} · ${x.dueAt ? escapeHtml(x.dueAt.slice(0,10)) : ccText('No due date', '无截止日期')} · ${ccText('Priority', '优先级')}: ${escapeHtml(x.priority || 'normal')}</div><div>${escapeHtml(x.description || '')}</div>${checklistHtml}${activityHtml}${(can('task.close') || can('task.edit')) && isOpen ? `<div class="cc-actions">${can('task.edit') ? `<button class="btn btn-sm" data-task-edit="${escapeHtml(x.id)}">${ccText('Edit task', '编辑任务')}</button>` : ''}${can('task.close') ? `<button class="btn btn-sm" data-task-complete="${escapeHtml(x.id)}" ${completionBlocked ? 'disabled title="' + escapeHtml(ccText('Complete all checklist items first', '请先完成全部清单项目')) + '"' : ''}>${ccText('Mark complete', '标记完成')}</button>` : ''}</div>` : ''}</article>`;
   }).join('');
   const renderWorkflowFields = processType => CONTROL_FIELDS.filter(([key]) => CONTROL_FIELDS_BY_TYPE[processType]?.includes(key) && (key !== 'assigneeId' || can('task.assign'))).map(([key, en, zh, type]) => {
@@ -878,7 +775,7 @@ async function renderControlCenter(root) {
 
   $$('[data-stocktake-editor]', root).forEach(el => {
     const workflow = workflows.find(item => item.id === el.dataset.stocktakeEditor);
-    el.stocktakeEditor = createStocktakeEditor(el, workflow?.form?.items || []);
+    el.stocktakeEditor = createStocktakeEditor(el, workflow?.form?.items || [], workflow?.form?.sourceFileName || '');
   });
   const workflowForm = $('#ccWorkflowForm');
   const mainStocktakeEditor = $('[data-stocktake-editor="new"]', root)?.stocktakeEditor;
@@ -888,15 +785,12 @@ async function renderControlCenter(root) {
     const sourceFile = type === 'stocktake' ? mainStocktakeEditor?.getSourceFile() : null;
     if (type === 'stocktake') {
       form.items = mainStocktakeEditor?.getRows() || [];
-      if (!form.items.length) { toast(ccText('Add or import at least one stocktake line', '请至少添加或导入一条盘点明细'), 'error'); return; }
+      if (!form.items.length && !sourceFile) { toast(ccText('Upload a spreadsheet or add a manual line', '请上传表格或手动添加一条盘点明细'), 'error'); return; }
       if (sourceFile) form.sourceFileName = sourceFile.name;
     }
     try {
-      const created = await POST('/api/v2/workflows', { type, title: fd.get('title'), form });
-      if (sourceFile && created.item?.id) {
-        try { const mimeType = stocktakeSourceMime(sourceFile); await POST(`/api/v2/workflows/${encodeURIComponent(created.item.id)}/attachments`, { fileName: sourceFile.name, mimeType, data: await readFileAsDataUrl(sourceFile, mimeType) }); }
-        catch (uploadError) { toast(ccText(`Request submitted, but the source spreadsheet could not be attached: ${uploadError.message}`, `申请已提交，但原始表格附件上传失败：${uploadError.message}`), 'error'); await renderControlCenter(root); return; }
-      }
+      const sourceFilePayload = sourceFile ? { fileName: sourceFile.name, mimeType: stocktakeSourceMime(sourceFile), data: await readFileAsDataUrl(sourceFile, stocktakeSourceMime(sourceFile)) } : null;
+      await POST('/api/v2/workflows', { type, title: fd.get('title'), form, ...(sourceFilePayload ? { sourceFile: sourceFilePayload } : {}) });
       toast(ccText('Request submitted', '申请已提交'), 'success'); await renderControlCenter(root);
     }
     catch (err) { toast(err.message, 'error'); }
@@ -982,12 +876,12 @@ async function renderControlCenter(root) {
     const sourceFile = editor?.getSourceFile() || null;
     if (editor) {
       payload.form.items = editor.getRows();
-      if (!payload.form.items.length) { toast(ccText('Add or import at least one stocktake line', '请至少添加或导入一条盘点明细'), 'error'); return; }
+      if (!payload.form.items.length && !sourceFile && !workflows.find(x => x.id === form.dataset.v2Resubmit)?.attachments?.some(a => ['.xlsx','.xls','.xlsm','.xlsb','.csv'].some(ext => a.name?.toLowerCase().endsWith(ext)))) { toast(ccText('Upload a spreadsheet or add a manual line', '请上传表格或手动添加一条盘点明细'), 'error'); return; }
       if (sourceFile) payload.form.sourceFileName = sourceFile.name;
     }
     try {
+      if (sourceFile) payload.sourceFile = { fileName: sourceFile.name, mimeType: stocktakeSourceMime(sourceFile), data: await readFileAsDataUrl(sourceFile, stocktakeSourceMime(sourceFile)) };
       await POST(`/api/v2/workflows/${encodeURIComponent(form.dataset.v2Resubmit)}/actions`, payload);
-      if (sourceFile) { const mimeType = stocktakeSourceMime(sourceFile); await POST(`/api/v2/workflows/${encodeURIComponent(form.dataset.v2Resubmit)}/attachments`, { fileName: sourceFile.name, mimeType, data: await readFileAsDataUrl(sourceFile, mimeType) }); }
       toast(ccText('Request resubmitted', '申请已重新提交'), 'success'); await renderControlCenter(root);
     }
     catch (err) { toast(err.message, 'error'); }

@@ -109,8 +109,8 @@ guard.configureRegionResolver(() => {
   (readAll('stores') || []).forEach(s => { if (s.regionId) map.set(s.id, s.regionId); });
   return map;
 });
-// 6mb：商品图片以 base64 上传，3MB 的图编码后约 4MB（解码后的实际上限见 saveMallImage）
-app.use(express.json({ limit: '6mb' }));
+// 15mb permits a 10MB stocktake spreadsheet encoded as base64; decoded limits are checked below.
+app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
 
 // 静态资源
@@ -2270,9 +2270,15 @@ app.get('/api/v2/workflows', (req, res) => {
 app.post('/api/v2/workflows', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'workflow.create')) return;
-  const b = req.body || {}, valid = controlCenter.validateWorkflow(String(b.type || ''), b.form);
+  const b = req.body || {}, type = String(b.type || '');
+  if (b.sourceFile && type !== 'stocktake') return res.status(400).json({ error: '只有盘点申请可以直接附加表格' });
+  const sourceResult = b.sourceFile ? parseStocktakeSourceFile(b.sourceFile) : null;
+  if (sourceResult?.error) return res.status(400).json({ error: sourceResult.error });
+  const source = sourceResult?.value || null;
+  const valid = controlCenter.validateWorkflow(type, b.form, { allowEmptyStocktakeItems: !!source });
   if (!valid.ok) return res.status(400).json({ error: valid.error });
-  const type = String(b.type), form = valid.value;
+  const form = valid.value;
+  if (source) form.sourceFileName = source.name;
   const sourceInspectionId = controlCenter.cleanText(b.sourceInspectionId, 100);
   const sourceInspection = sourceInspectionId ? (readAll('storeInspections') || []).find(x => x.id === sourceInspectionId) : null;
   if (sourceInspectionId && !sourceInspection) return res.status(404).json({ error: '来源巡检记录不存在' });
@@ -2331,6 +2337,10 @@ app.post('/api/v2/workflows', (req, res) => {
       return res.status(500).json({ error: '复制巡检凭证失败，整改申请未创建' });
     }
   }
+  if (source) {
+    try { saveStocktakeSource(item, u, source); }
+    catch (err) { return res.status(500).json({ error: '保存盘点表格失败，申请未创建' }); }
+  }
   item.history = [{ action: 'submit', actorId: u.id, actorName: item.createdByName, note: '', createdAt: item.createdAt }];
   items.unshift(item);
   try {
@@ -2339,7 +2349,7 @@ app.post('/api/v2/workflows', (req, res) => {
     for (const attachment of item.attachments) {
       try { fs.unlinkSync(path.join(workflowAttachmentDir, attachment.storedName)); } catch (cleanupError) {}
     }
-    return res.status(500).json({ error: '保存整改申请失败，请重试' });
+    return res.status(500).json({ error: '保存申请失败，请重试' });
   }
   if (sourceInspection) {
     sourceInspection.remediationWorkflowId = item.id;
@@ -2460,9 +2470,17 @@ app.post('/api/v2/workflows/:id/actions', (req, res) => {
   } else return res.status(400).json({ error: '不支持的操作' });
   let assigneeChanged = false;
   let newAssignee = null;
+  let pendingSource = null;
   if (action === 'resubmit') {
-    const valid = controlCenter.validateWorkflow(item.type, req.body?.form);
+    if (req.body?.sourceFile && item.type !== 'stocktake') return res.status(400).json({ error: '只有盘点申请可以直接附加表格' });
+    const sourceResult = req.body?.sourceFile ? parseStocktakeSourceFile(req.body.sourceFile) : null;
+    if (sourceResult?.error) return res.status(400).json({ error: sourceResult.error });
+    pendingSource = sourceResult?.value || null;
+    if (pendingSource && !stocktakeSourceCapacity(item, pendingSource)) return res.status(409).json({ error: '此申请附件最多 10 个，合计不超过 20MB' });
+    const valid = controlCenter.validateWorkflow(item.type, req.body?.form, { allowEmptyStocktakeItems: !!pendingSource || hasStocktakeSource(item) });
     if (!valid.ok) return res.status(400).json({ error: valid.error });
+    if (pendingSource) valid.value.sourceFileName = pendingSource.name;
+    else if (item.type === 'stocktake' && hasStocktakeSource(item)) valid.value.sourceFileName = item.form?.sourceFileName || (item.attachments || []).find(attachment => stocktakeSourceTypes[attachment.mimeType])?.name || '';
     const scope = guard.scopeOf(req, 'workflow.create');
     const nextStoreId = scope.level === 'store' ? u.storeId : null;
     const nextStore = (readAll('stores') || []).find(x => x.id === nextStoreId);
@@ -2519,8 +2537,16 @@ app.post('/api/v2/workflows/:id/actions', (req, res) => {
   item.updatedAt = nowIso(); item.history = Array.isArray(item.history) ? item.history : [];
   item.history.push({ action, actorId: u.id, actorName: u.name || u.username, note: result.note || controlCenter.cleanText(req.body?.note, 1000), createdAt: item.updatedAt });
   if (assigneeChanged) item.history.push({ action: 'assignee.update', actorId: u.id, actorName: u.name || u.username, note: item.assigneeName || '负责人已取消', createdAt: item.updatedAt });
-  writeAll('workflowInstances', items);
+  let savedSource = null;
+  try {
+    if (pendingSource) savedSource = saveStocktakeSource(item, u, pendingSource);
+    writeAll('workflowInstances', items);
+  } catch (err) {
+    if (savedSource) { try { fs.unlinkSync(path.join(workflowAttachmentDir, savedSource.storedName)); } catch (cleanupError) {} }
+    return res.status(500).json({ error: '保存申请或表格失败，请重试' });
+  }
   recordControlAudit(req, u, `workflow.${action}`, item.type, item.id, { status: item.status });
+  if (savedSource) recordControlAudit(req, u, 'workflow.attachment.upload', item.type, item.id, { attachmentId: savedSource.id, size: savedSource.size });
   if (assigneeChanged) recordControlAudit(req, u, 'workflow.assignee.update', item.type, item.id, { assigneeId: item.assigneeId });
   notifyUser(item.createdBy, `workflow.${action}`, `流程状态更新：${item.title}`, `当前状态：${item.status}`, 'workflow', item.id);
   if (action === 'approve') notifyCurrentApprovers(item);
@@ -2536,9 +2562,45 @@ const workflowAttachmentTypes = {
   'application/pdf': { ext: '.pdf', signature: b => b.subarray(0, 5).toString() === '%PDF-' },
   'image/png': { ext: '.png', signature: b => b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) },
   'image/jpeg': { ext: '.jpg', signature: b => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
-  'text/csv': { ext: '.csv', signature: b => { const value = b.toString('utf8'); return !!value && !value.includes('\0') && !value.includes('\ufffd') && /[,;\t\n]/.test(value); } },
+  'text/csv': { ext: '.csv', signature: b => { const value = b.toString('utf8'); return !!value && !value.includes('\0') && !value.includes('\ufffd'); } },
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': { ext: '.xlsx', signature: b => b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04 },
+  'application/vnd.ms-excel': { ext: '.xls', signature: b => b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([0xd0,0xcf,0x11,0xe0,0xa1,0xb1,0x1a,0xe1])) },
+  'application/vnd.ms-excel.sheet.macroenabled.12': { ext: '.xlsm', signature: b => b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04 },
+  'application/vnd.ms-excel.sheet.binary.macroenabled.12': { ext: '.xlsb', signature: b => b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04 },
 };
+const stocktakeSourceTypes = Object.fromEntries(['text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'application/vnd.ms-excel.sheet.macroenabled.12', 'application/vnd.ms-excel.sheet.binary.macroenabled.12'].map(mime => [mime, workflowAttachmentTypes[mime]]));
+function parseStocktakeSourceFile(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: '请选择 Excel 或 CSV 文件' };
+  const name = path.basename(String(raw.fileName || '')).replace(/[\\/\r\n\0]/g, '_').slice(0, 180);
+  const mimeType = String(raw.mimeType || '').toLowerCase();
+  const type = stocktakeSourceTypes[mimeType];
+  if (!name || !type || !name.toLowerCase().endsWith(type.ext)) return { error: '仅支持 Excel（XLSX、XLS、XLSM、XLSB）或 CSV 文件' };
+  if (typeof raw.data !== 'string' || raw.data.length > 14_000_000) return { error: '盘点表格不能超过 10MB' };
+  const match = raw.data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match || match[1].toLowerCase() !== mimeType) return { error: '文件上传格式无效' };
+  const buffer = Buffer.from(match[2], 'base64');
+  const fileSignatureMatches = type.signature(buffer);
+  if (!buffer.length || buffer.length > 10 * 1024 * 1024 || !fileSignatureMatches) return { error: '请选择有效的 Excel 或 CSV 文件（最大 10MB）' };
+  return { value: { name, mimeType, ext: type.ext, buffer } };
+}
+function hasStocktakeSource(item) {
+  return (item.attachments || []).some(attachment => stocktakeSourceTypes[attachment.mimeType] && attachment.name?.toLowerCase().endsWith(stocktakeSourceTypes[attachment.mimeType].ext));
+}
+function stocktakeSourceCapacity(item, source) {
+  const attachments = item.attachments || [];
+  return attachments.length < 10 && attachments.reduce((sum, attachment) => sum + Number(attachment.size || 0), 0) + source.buffer.length <= 20 * 1024 * 1024;
+}
+function saveStocktakeSource(item, user, source) {
+  fs.mkdirSync(path.dirname(workflowAttachmentDir), { recursive: true, mode: 0o700 });
+  fs.mkdirSync(workflowAttachmentDir, { recursive: true, mode: 0o700 });
+  fs.chmodSync(path.dirname(workflowAttachmentDir), 0o700);
+  fs.chmodSync(workflowAttachmentDir, 0o700);
+  const id = nanoid(), storedName = `${id}${source.ext}`;
+  fs.writeFileSync(path.join(workflowAttachmentDir, storedName), source.buffer, { mode: 0o600, flag: 'wx' });
+  const attachment = { id, name: source.name, mimeType: source.mimeType, evidenceType: 'supporting', executionRound: null, size: source.buffer.length, storedName, uploadedBy: user.id, uploadedByName: user.name || user.username, createdAt: nowIso() };
+  item.attachments.push(attachment);
+  return attachment;
+}
 app.post('/api/v2/workflows/:id/attachments', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const items = readAll('workflowInstances') || [], item = items.find(x => x.id === req.params.id);
@@ -2560,11 +2622,12 @@ app.post('/api/v2/workflows/:id/attachments', (req, res) => {
     if (!canExecuteRemediation(req, res, item)) return;
   }
   const { fileName, mimeType, data } = req.body || {}, type = workflowAttachmentTypes[String(mimeType || '').toLowerCase()];
-  if (!type || typeof data !== 'string' || data.length > 5_600_000) return res.status(400).json({ error: '仅支持 4MB 以内的 PDF、PNG、JPG、CSV 或 XLSX 文件' });
+  const maxBytes = item.type === 'stocktake' && stocktakeSourceTypes[String(mimeType || '').toLowerCase()] ? 10 * 1024 * 1024 : 4 * 1024 * 1024;
+  if (!type || typeof data !== 'string' || data.length > Math.ceil(maxBytes * 4 / 3) + 100) return res.status(400).json({ error: '不支持的附件格式或文件过大' });
   const match = data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
   if (!match || match[1].toLowerCase() !== mimeType.toLowerCase()) return res.status(400).json({ error: '附件格式无效' });
   const buffer = Buffer.from(match[2], 'base64');
-  if (!buffer.length || buffer.length > 4 * 1024 * 1024 || !type.signature(buffer)) return res.status(400).json({ error: '文件内容与格式不匹配或超过 4MB' });
+  if (!buffer.length || buffer.length > maxBytes || !type.signature(buffer)) return res.status(400).json({ error: '文件类型不匹配或超过大小限制' });
   item.attachments = Array.isArray(item.attachments) ? item.attachments : [];
   if (item.attachments.length >= 10 || item.attachments.reduce((sum, x) => sum + Number(x.size || 0), 0) + buffer.length > 20 * 1024 * 1024) return res.status(409).json({ error: '每个流程最多 10 个附件，合计不超过 20MB' });
   fs.mkdirSync(path.dirname(workflowAttachmentDir), { recursive: true, mode: 0o700 });
@@ -2589,7 +2652,7 @@ app.get('/api/v2/workflows/:id/attachments/:attachmentId/download', (req, res) =
   if (!guard.checkPerm(req, res, 'workflow.view')) return;
   if (!controlVisible(req, 'workflow.view', item)) return res.status(403).json({ error: '无权限查看此流程附件' });
   const attachment = (item.attachments || []).find(x => x.id === req.params.attachmentId);
-  if (!attachment || !/^[A-Za-z0-9_-]+\.(pdf|png|jpg|csv|xlsx)$/.test(attachment.storedName || '')) return res.status(404).json({ error: '附件不存在' });
+  if (!attachment || !/^[A-Za-z0-9_-]+\.(pdf|png|jpg|csv|xlsx|xls|xlsm|xlsb)$/.test(attachment.storedName || '')) return res.status(404).json({ error: '附件不存在' });
   const filePath = path.join(workflowAttachmentDir, attachment.storedName);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: '附件文件不存在' });
   const asciiName = attachment.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
@@ -2645,7 +2708,7 @@ app.get('/api/v2/tasks/:id/attachments/:attachmentId/download', (req, res) => {
   const item = (readAll('tasks') || []).find(x => x.id === req.params.id);
   if (!item || !controlVisible(req, 'task.view', item)) return res.status(404).json({ error: '任务不存在' });
   const attachment = (item.attachments || []).find(x => x.id === req.params.attachmentId);
-  if (!attachment || !/^[A-Za-z0-9_-]+\.(pdf|png|jpg|csv|xlsx)$/.test(attachment.storedName || '')) return res.status(404).json({ error: '凭证不存在' });
+  if (!attachment || !/^[A-Za-z0-9_-]+\.(pdf|png|jpg|csv|xlsx|xls|xlsm|xlsb)$/.test(attachment.storedName || '')) return res.status(404).json({ error: '凭证不存在' });
   const filePath = path.join(taskAttachmentDir, attachment.storedName);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: '凭证文件不存在' });
   const asciiName = attachment.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');

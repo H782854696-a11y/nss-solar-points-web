@@ -170,4 +170,36 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
   const reviewed = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'review_pass' }, reviewer.cookie);
   assert.equal(reviewed.status, 200, JSON.stringify(reviewed.data));
   assert.equal(reviewed.data.item.status, 'completed');
+
+  const XLSX = require('../public/xlsx.full.min.js');
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['任意列', '自定义标题'], ['逆变器', '货物异常']]), '自定义盘点');
+  const spreadsheet = Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
+  const sourceFile = { fileName: '自定义盘点.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', data: `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${spreadsheet.toString('base64')}` };
+  const fileOnly = await request('POST', '/api/v2/workflows', { type: 'stocktake', title: 'Custom sheet without item columns', form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Arbitrary Excel layout', items: [] }, sourceFile }, managerCookie);
+  assert.equal(fileOnly.status, 201, JSON.stringify(fileOnly.data));
+  assert.deepEqual(fileOnly.data.item.form.items, []);
+  assert.equal(fileOnly.data.item.attachments.length, 1);
+  assert.equal(fileOnly.data.item.attachments[0].name, sourceFile.fileName);
+  const downloaded = await fetch(`${base}/api/v2/workflows/${fileOnly.data.item.id}/attachments/${fileOnly.data.item.attachments[0].id}/download`, { headers: { cookie: managerCookie } });
+  assert.equal(downloaded.status, 200);
+  assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), spreadsheet);
+  for (const [extension, mimeType] of [
+    ['xls', 'application/vnd.ms-excel'],
+    ['xlsm', 'application/vnd.ms-excel.sheet.macroenabled.12'],
+    ['xlsb', 'application/vnd.ms-excel.sheet.binary.macroenabled.12'],
+  ]) {
+    const file = Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: extension }));
+    const result = await request('POST', '/api/v2/workflows', {
+      type: 'stocktake', title: `Custom ${extension} workbook`,
+      form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Arbitrary Excel layout', items: [] },
+      sourceFile: { fileName: `自定义盘点.${extension}`, mimeType, data: `data:${mimeType};base64,${file.toString('base64')}` },
+    }, managerCookie);
+    assert.equal(result.status, 201, `${extension}: ${JSON.stringify(result.data)}`);
+    assert.equal(result.data.item.attachments[0].name, `自定义盘点.${extension}`);
+  }
+  const missingFile = await request('POST', '/api/v2/workflows', { type: 'stocktake', form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'No data', items: [] } }, managerCookie);
+  assert.equal(missingFile.status, 400);
+  const falseExcel = await request('POST', '/api/v2/workflows', { type: 'stocktake', form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Invalid file', items: [] }, sourceFile: { ...sourceFile, data: 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,ZXhl' } }, managerCookie);
+  assert.equal(falseExcel.status, 400);
 });
