@@ -61,7 +61,7 @@ const LOGIN_LOCK_MS = 5 * 60 * 1000;
 const loginFails = new Map();
 
 function clientIp(req) {
-  return String(req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.ip || 'unknown';
+  return req.ip || 'unknown';
 }
 function loginKey(req, username) { return `${clientIp(req)}|${String(username || '').toLowerCase()}`; }
 function lockRemaining(key) {
@@ -98,6 +98,8 @@ const { auditLog, readAuditLog } = require('./lib/audit');
 
 // ---------- 应用 ----------
 const app = express();
+// Only the local Nginx hop may supply a client address; direct requests cannot spoof it.
+app.set('trust proxy', 'loopback');
 // RBAC：把「从请求取登录用户」的函数注入守卫层（避免守卫层反向依赖本文件）
 guard.configure(getSessionUser);
 // RBAC：注入「storeId → regionId」解析器。
