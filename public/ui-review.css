@@ -1,0 +1,73 @@
+/* Review-driven layout refinements, scoped to the management app. */
+.app-shell .sidebar { border-right-color: var(--nav-line); }
+.app-shell .logo-row { border-bottom-color: var(--nav-line); }
+.app-shell .logo-row .brand-logo { height: 32px; max-width: 190px; }
+.app-shell .nav-group-label { color: var(--nav-muted); font-size: 11px; }
+.app-shell .nav-item { border-left: 3px solid transparent; border-radius: 0 10px 10px 0; }
+.app-shell .nav-item:hover { color: #fff; }
+.app-shell .nav-item.active,
+.app-shell .nav-item-primary.active { color: #fff; background: #1C4777; border-left-color: #83B6FF; }
+.app-shell .nav-item.active svg { color: #fff; }
+.app-shell .nav-item-primary { background: transparent; color: var(--nav-text); }
+.app-shell .nav-item-primary:hover { background: var(--nav-hover); color: #fff; }
+.app-shell .nav-item:focus-visible,
+.app-shell button:focus-visible,
+.app-shell a:focus-visible { outline: 2px solid #84B8FF; outline-offset: 2px; }
+.app-shell .nav-count { margin-left: auto; min-width: 18px; padding: 2px 6px; border-radius: 999px; background: #F5A524; color: #122640; font-size: 11px; font-weight: 700; text-align: center; }
+.app-shell .user-block { border-top-color: var(--nav-line); }
+.app-shell .user-name { color: #F5F9FF; }
+.app-shell .user-role { color: var(--nav-muted); }
+.app-shell .header { height: 64px; background: var(--surface); border-bottom-color: var(--line); }
+.app-shell .page-crumb { color: var(--ink); }
+.app-shell .content { background: var(--bg); }
+.app-shell .cc-page-header { min-height: 64px; margin-bottom: 8px; align-items: center; }
+.app-shell .cc-page-header time { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.app-shell .cc-overview { margin-top: 8px; }
+.app-shell .cc-overview-grid { gap: 16px; }
+.app-shell .cc-overview-card { min-height: 118px; gap: 9px; padding: 16px; border-radius: 14px; background: var(--surface); color: var(--muted); }
+.app-shell .cc-overview-card strong { font-size: 28px; line-height: 1.1; font-weight: 600; font-variant-numeric: tabular-nums; }
+.app-shell .cc-overview-card small { color: var(--brand); font-weight: 600; }
+.app-shell .cc-tone-warning { border-top: 3px solid #C2760A; }
+.app-shell .cc-tone-brand { border-top: 3px solid #1D4ED8; }
+.app-shell .cc-tone-danger { border-top: 3px solid #D93F3F; }
+.app-shell .cc-tone-neutral { border-top: 3px solid #8A909B; }
+.app-shell .cc-announcement-ticker { margin: 16px 0 24px; border-color: var(--line); border-left: 3px solid #1D4ED8; background: var(--surface); color: var(--ink); }
+.app-shell .cc-announcement-ticker button { color: var(--brand); }
+.app-shell .cc-announcement-ticker:focus-within .cc-ticker-content { animation-play-state: paused; }
+.app-shell .cc-dashboard-grid { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 24px; }
+.app-shell .cc-dashboard-panel { min-height: 0; padding: 16px; background: var(--surface); }
+.app-shell .cc-dashboard-panel h3 { margin-bottom: 12px; }
+.app-shell .cc-actions-panel { grid-column: 1 / -1; }
+.app-shell .cc-quick-actions { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.app-shell .cc-quick-actions button { display: flex; align-items: center; gap: 8px; min-height: 48px; padding: 10px 12px; border-color: var(--line); background: var(--surface); color: var(--ink); font-weight: 600; white-space: normal; }
+.app-shell .cc-quick-actions button:hover { border-color: var(--brand); background: var(--tint-50); }
+.app-shell .cc-quick-actions button > span:first-child { color: var(--brand); font-size: 20px; }
+.app-shell .cc-quick-actions button b { margin-left: auto; color: var(--brand); }
+.app-shell .cc-dashboard-list { gap: 0; }
+.app-shell .cc-dashboard-list button { align-items: center; min-height: 48px; padding: 8px 0; }
+.app-shell .cc-dashboard-list button > span:first-child { display: grid; gap: 3px; min-width: 0; white-space: normal; }
+.app-shell .cc-dashboard-list button > span:first-child strong { font-size: 13px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.app-shell .cc-dashboard-list em { color: var(--brand); font-size: 11px; font-style: normal; }
+.app-shell .cc-dashboard-list small { color: var(--muted); font-size: 11px; }
+.app-shell .cc-list-status { flex: 0 0 auto; color: var(--brand); font-size: 12px; }
+.app-shell .cc-count-badge { flex: 0 0 auto; padding: 3px 9px; border-radius: 999px; background: var(--tint-100); color: var(--brand); font-size: 12px; }
+.app-shell .cc-loading { padding: 24px; }
+.app-shell .cc-loading-title, .app-shell .cc-loading-card, .app-shell .cc-loading-panel { background: linear-gradient(90deg, var(--line-soft), var(--line), var(--line-soft)); background-size: 200% 100%; animation: cc-shimmer 1.5s infinite; border-radius: 14px; }
+.app-shell .cc-loading-title { height: 32px; width: 180px; margin-bottom: 24px; }
+.app-shell .cc-loading-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.app-shell .cc-loading-card { height: 118px; }
+.app-shell .cc-loading-panel { height: 220px; margin-top: 24px; }
+@keyframes cc-shimmer { to { background-position: -200% 0; } }
+.app-shell[data-theme="dark"] .card,
+.app-shell[data-theme="dark"] .cc-section,
+.app-shell[data-theme="dark"] input,
+.app-shell[data-theme="dark"] select,
+.app-shell[data-theme="dark"] textarea { color: var(--ink); }
+.app-shell[data-theme="dark"] .cc-dashboard-panel,
+.app-shell[data-theme="dark"] .cc-overview-card,
+.app-shell[data-theme="dark"] .cc-quick-actions button { background: var(--surface); }
+.app-shell[data-theme="dark"] .btn-primary { background: #2563EB; border-color: #2563EB; color: #fff; }
+@media (max-width: 1200px) { .app-shell .cc-quick-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 900px) { .app-shell .cc-overview-grid, .app-shell .cc-loading-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .app-shell .cc-dashboard-grid { grid-template-columns: 1fr; gap: 16px; } .app-shell .cc-actions-panel { grid-column: auto; } }
+@media (max-width: 640px) { .app-shell .cc-quick-actions { grid-template-columns: 1fr; } .app-shell .cc-page-header time { display: none; } .app-shell .cc-overview-grid { gap: 8px; } .app-shell .cc-overview-card { min-height: 100px; padding: 12px; } .app-shell .cc-overview-card strong { font-size: 24px; } .app-shell .cc-dashboard-panel { padding: 16px; } }
+@media (prefers-reduced-motion: reduce) { .app-shell .cc-loading-title, .app-shell .cc-loading-card, .app-shell .cc-loading-panel { animation: none; } }

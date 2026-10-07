@@ -1,0 +1,57 @@
+/* NSS Solar control platform design tokens. Login screen keeps its existing branding. */
+.app-shell {
+  --brand: #1D4ED8;
+  --brand-dark: #1E40AF;
+  --brand-bright: #2563EB;
+  --tint-50: #EFF6FF;
+  --tint-100: #DBEAFE;
+  --tint-200: #BFDBFE;
+  --ok-bg: #DCFCEB;
+  --ok-ink: #0B7D56;
+  --warn-bg: #FFF4DB;
+  --warn-ink: #9A5900;
+  --danger-bg: #FEE8E8;
+  --danger-ink: #B4232A;
+  --ink: #182334;
+  --body: #374151;
+  --muted: #4B5563;
+  --subtle: #6B7280;
+  --bg: #F4F7FB;
+  --surface: #FFFFFF;
+  --line: #E1E7EF;
+  --line-soft: #F0F4F9;
+  --nav-bg: #0B2244;
+  --nav-text: #DCE8F8;
+  --nav-muted: #9FB5CF;
+  --nav-line: #244368;
+  --nav-hover: #183B68;
+  --nav-accent: #7CB2FF;
+  --radius-card: 14px;
+  --radius-ctl: 10px;
+  --shadow-card-rest: 0 1px 3px rgba(17, 34, 61, .06);
+}
+
+.app-shell[data-theme="dark"] {
+  --brand: #82B1FF;
+  --brand-dark: #A3C6FF;
+  --tint-50: #142C4C;
+  --tint-100: #1C3B63;
+  --tint-200: #315A89;
+  --ink: #E8F0FC;
+  --body: #D1DCEC;
+  --muted: #AEBED2;
+  --subtle: #93A8C2;
+  --bg: #0A1728;
+  --surface: #112239;
+  --line: #2D4663;
+  --line-soft: #1A304A;
+  --nav-bg: #071629;
+  --nav-text: #DCE8F8;
+  --nav-hover: #183B68;
+  --ok-bg: #103B2E;
+  --ok-ink: #7EDBB6;
+  --warn-bg: #493417;
+  --warn-ink: #FFD78A;
+  --danger-bg: #4B2429;
+  --danger-ink: #FFACB4;
+}
