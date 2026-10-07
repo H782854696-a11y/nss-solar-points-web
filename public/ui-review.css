@@ -1,26 +1,93 @@
 /* Review-driven layout refinements, scoped to the management app. */
 .app-shell .sidebar { border-right-color: var(--nav-line); }
 .app-shell .logo-row { border-bottom-color: var(--nav-line); }
+.app-shell .logo-row { height: 72px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; }
 .app-shell .logo-row .brand-logo { height: 32px; max-width: 190px; }
-.app-shell .nav-group-label { color: var(--nav-muted); font-size: 11px; }
+.app-shell .logo-subtitle { color: #9FB5CF; font-size: 10.5px; letter-spacing: .08em; padding-left: 2px; }
+.app-shell .nav-group-label { color: #A8BBD0; font-size: 10.5px; font-weight: 600; letter-spacing: .1em; }
+.app-shell .nav-group-system { margin-top: 12px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,.08); }
 .app-shell .nav-item { border-left: 3px solid transparent; border-radius: 0 10px 10px 0; }
+.app-shell .nav-item .nav-icon { width: 26px; height: 26px; border-radius: 7px; background: rgba(255,255,255,.06); display: grid; place-items: center; flex: 0 0 auto; }
+.app-shell .nav-item .nav-icon svg { width: 15px; height: 15px; }
+.app-shell .nav-item.active .nav-icon { background: rgba(255,255,255,.16); }
 .app-shell .nav-item:hover { color: #fff; }
 .app-shell .nav-item.active,
 .app-shell .nav-item-primary.active { color: #fff; background: #1C4777; border-left-color: #83B6FF; }
 .app-shell .nav-item.active svg { color: #fff; }
-.app-shell .nav-item-primary { background: transparent; color: var(--nav-text); }
+.app-shell .nav-item-primary { margin: 10px 10px 8px; border: 1px solid rgba(255,255,255,.12); border-left: 3px solid transparent; border-radius: 10px; background: rgba(255,255,255,.06); color: #F1F5F9; }
+.app-shell .nav-primary-arrow { margin-left: auto; font-size: 21px; line-height: 1; color: #93C5FD; }
 .app-shell .nav-item-primary:hover { background: var(--nav-hover); color: #fff; }
+.app-shell .nav-item-primary.active { border-color: rgba(96,165,250,.5); border-left-color: #83B6FF; background: linear-gradient(90deg, rgba(29,78,216,.4), rgba(29,78,216,.15)); }
 .app-shell .nav-item:focus-visible,
 .app-shell button:focus-visible,
 .app-shell a:focus-visible { outline: 2px solid #84B8FF; outline-offset: 2px; }
-.app-shell .nav-count { margin-left: auto; min-width: 18px; padding: 2px 6px; border-radius: 999px; background: #F5A524; color: #122640; font-size: 11px; font-weight: 700; text-align: center; }
+.app-shell .nav-count { margin-left: auto; min-width: 20px; padding: 2px 6px; border-radius: 999px; background: #D93F3F; color: #fff; font-size: 10.5px; font-weight: 700; text-align: center; }
+.app-shell .nav-count-neutral { background: rgba(255,255,255,.13); color: #DCE8F8; }
 .app-shell .user-block { border-top-color: var(--nav-line); }
+.app-shell .user-block { cursor: pointer; }
+.app-shell .user-block:hover { background: var(--nav-hover); }
 .app-shell .user-name { color: #F5F9FF; }
 .app-shell .user-role { color: var(--nav-muted); }
+.app-shell .user-role { display: flex; align-items: center; gap: 5px; }
+.app-shell .user-online-dot { width: 5px; height: 5px; border-radius: 50%; background: #0E9F6E; }
+.app-shell .user-chevron { margin-left: auto; color: #9FB5CF; font-size: 18px; }
 .app-shell .header { height: 64px; background: var(--surface); border-bottom-color: var(--line); }
 .app-shell .page-crumb { color: var(--ink); }
 .app-shell .content { background: var(--bg); }
 .app-shell .cc-page-header { min-height: 64px; margin-bottom: 8px; align-items: center; }
+.app-shell .page-title { color: var(--ink); font-size: 22px; font-weight: 600; }
+.app-shell .page-title::before { width: 3px; height: 23px; }
+.app-shell .page-subtitle { font-size: 13px; }
+.app-shell .cc-detail-heading { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; margin-bottom: 24px; padding: 0; }
+.app-shell .cc-detail-heading strong { font-size: 22px; font-weight: 600; color: var(--ink); display: flex; align-items: center; gap: 10px; }
+.app-shell .cc-detail-heading strong::before { content: ''; display: block; width: 3px; height: 23px; border-radius: 2px; background: var(--brand); }
+.app-shell .cc-detail-heading small { color: var(--muted); font-size: 13px; }
+.app-shell .cc-workspace-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; margin: 0 0 24px; }
+.app-shell .cc-detail-stat { display: flex; flex-direction: column; gap: 6px; min-height: 102px; padding: 16px; border: 1px solid var(--line); border-left-width: 3px; border-radius: 10px; background: var(--surface); color: var(--muted); font-size: 12px; }
+.app-shell .cc-detail-stat strong { color: var(--ink); font-size: 28px; font-weight: 600; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.app-shell .cc-detail-stat small { color: var(--muted); }
+.app-shell .cc-card-statuses { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.app-shell .cc-status, .app-shell .cc-due { display: inline-flex; align-items: center; gap: 6px; border-radius: 999px; padding: 4px 9px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+.app-shell .cc-status i, .app-shell .cc-due i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex: 0 0 auto; }
+.app-shell .cc-status-success { color: #0B7D56; background: #E7F6F0; }
+.app-shell .cc-status-warning { color: #965900; background: #FDF3E3; }
+.app-shell .cc-status-danger { color: #B4232A; background: #FDEEEE; }
+.app-shell .cc-status-brand { color: #1D4ED8; background: #EEF3FF; }
+.app-shell .cc-status-neutral { color: #626D7C; background: #F0F1F3; }
+.app-shell[data-theme="dark"] .cc-status-success { color: #7EDBB6; background: #103B2E; }
+.app-shell[data-theme="dark"] .cc-status-warning { color: #FFD78A; background: #493417; }
+.app-shell[data-theme="dark"] .cc-status-danger { color: #FFACB4; background: #4B2429; }
+.app-shell[data-theme="dark"] .cc-status-brand { color: #A3C6FF; background: #1C3B63; }
+.app-shell[data-theme="dark"] .cc-status-neutral { color: #AEBED2; background: #293D55; }
+.app-shell .cc-task-progress { width: 100%; height: 7px; accent-color: #1D4ED8; }
+.app-shell .cc-upload-zone { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; min-height: 138px; margin-top: 12px; padding: 20px; border: 2px dashed var(--tint-200); border-radius: 12px; background: var(--tint-50); color: var(--ink); text-align: center; cursor: pointer; }
+.app-shell .cc-upload-zone.dragover, .app-shell .cc-upload-zone:hover { border-color: var(--brand); background: var(--tint-100); }
+.app-shell .cc-upload-zone > span { color: var(--brand); font-size: 30px; line-height: 1; }
+.app-shell .cc-upload-zone small { color: var(--muted); font-size: 12px; }
+.app-shell .cc-upload-zone input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.app-shell .cc-upload-zone:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
+.app-shell .cc-stocktake-help { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; margin-top: 10px; color: var(--muted); font-size: 12px; }
+.app-shell .cc-stocktake-help button { margin-left: auto; }
+.app-shell .cc-empty-state { min-height: 160px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--muted); text-align: center; }
+.app-shell .cc-empty-state strong { color: var(--ink); font-size: 15px; }
+.app-shell .cc-empty-icon { width: 40px; height: 40px; border-radius: 10px; display: grid; place-items: center; background: var(--tint-50); color: var(--brand); font-size: 24px; }
+.app-shell .cc-workflow-pager .btn.active { color: #fff; background: #1D4ED8; border-color: #1D4ED8; }
+.app-shell .cc-workflow-filters [data-workflow-reset], .app-shell .cc-task-filters [data-task-reset] { border: 0; background: transparent; padding: 0 6px; }
+.app-shell .pill-frozen::before { content: ''; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #8A909B; margin-right: 5px; vertical-align: middle; }
+.app-shell .pill-active .d { background: #0E9F6E; }
+.app-shell .cc-field:has([required]) > span::after,
+.modal-root .cc-field:has([required]) > span::after,
+.app-shell .modal-form-row label:has([required]) > span::after { content: ' *'; color: #D93F3F; font-weight: 700; }
+.app-shell .cc-field .was-touched:invalid,
+.modal-root .cc-field .was-touched:invalid { border-color: #D93F3F; }
+.app-shell .field-error,
+.modal-root .field-error { margin-top: 3px; color: #B4232A; font-size: 11.5px; }
+.app-shell .cc-icon-action { display: inline-flex; align-items: center; justify-content: center; width: 31px; height: 31px; min-width: 31px; padding: 0; font-size: 16px; }
+.app-shell .cc-icon-action.cc-positive { color: #0B7D56; }
+.app-shell .cc-icon-action.cc-warning { color: #965900; }
+.app-shell .cc-icon-action.cc-danger { color: #B4232A; }
+.app-shell .cc-form-grid > .cc-wide:has(> button[type="submit"]),
+.app-shell .cc-form-grid > div:has(> button.btn-primary) { display: flex; justify-content: flex-end; }
 .app-shell .cc-page-header time { margin-left: auto; color: var(--muted); font-size: 12px; white-space: nowrap; }
 .app-shell .cc-overview { margin-top: 8px; }
 .app-shell .cc-overview-grid { gap: 16px; }
@@ -73,5 +140,6 @@
 .app-shell[data-theme="dark"] .btn-primary { background: #2563EB; border-color: #2563EB; color: #fff; }
 @media (max-width: 1200px) { .app-shell .cc-quick-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 900px) { .app-shell .cc-overview-grid, .app-shell .cc-loading-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .app-shell .cc-dashboard-grid { grid-template-columns: 1fr; gap: 16px; } .app-shell .cc-actions-panel { grid-column: auto; } }
+@media (max-width: 900px) { .app-shell .cc-workspace-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .app-shell .cc-quick-actions { grid-template-columns: 1fr; } .app-shell .cc-page-header time { display: none; } .app-shell .cc-overview-grid { gap: 8px; } .app-shell .cc-overview-card { min-height: 100px; padding: 12px; } .app-shell .cc-overview-card strong { font-size: 24px; } .app-shell .cc-dashboard-panel { padding: 16px; } }
 @media (prefers-reduced-motion: reduce) { .app-shell .cc-loading-title, .app-shell .cc-loading-card, .app-shell .cc-loading-panel { animation: none; } }
