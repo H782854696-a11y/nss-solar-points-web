@@ -917,13 +917,13 @@ async function renderControlCenter(root) {
   const initialProcessType = Object.keys(CREATABLE_CONTROL_TYPES)[0];
   root.innerHTML = `
     <div class="page-header cc-page-header"><div class="page-header-text"><div class="page-title">${ccText('Control Platform', '中控平台')}</div><div class="page-subtitle">${ccText('Approvals, tasks, store follow-up and announcements', '审批流程、任务协作、门店跟进与内容公告')}</div></div><time>${escapeHtml(new Date().toLocaleDateString())}</time></div>
+    <div class="cc-announcement-ticker"><span aria-hidden="true">📢</span><span class="cc-ticker-track"><span class="cc-ticker-content">${leadAnnouncement ? escapeHtml(leadAnnouncement.title) : ccText('No important announcement yet', '暂无重要公告')}</span></span><button type="button" data-cc-jump="announcements">${ccText('View all', '查看全部')} →</button></div>
     <section class="cc-overview"><div class="cc-overview-grid">
       ${mayViewWorkflows ? metric(ccText('My pending approvals', '待我审批'), count(workflowData.pendingForMe), 'approvals', 'warning', true) : ''}
       ${mayViewTasks ? metric(ccText('Open tasks', '未完成任务'), taskData.counts ? count(taskData.counts.open || 0) + count(taskData.counts.in_progress || 0) : NaN, 'collaboration', 'brand') : ''}
       ${mayViewWorkflows ? metric(ccText('Open store remediation', '未完成门店整改'), workflowData.countsByType ? openRemediationCount : NaN, 'approvals', 'danger') : ''}
       ${metric(ccText('Unread notifications', '未读通知'), count(noticeData.unread), 'collaboration', 'neutral')}
     </div>
-    <div class="cc-announcement-ticker"><span aria-hidden="true">📢</span><span class="cc-ticker-track"><span class="cc-ticker-content">${leadAnnouncement ? escapeHtml(leadAnnouncement.title) : ccText('No important announcement yet', '暂无重要公告')}</span></span><button type="button" data-cc-jump="announcements">${ccText('View all', '查看全部')} →</button></div>
     <div class="cc-dashboard-grid">
       <section class="card cc-dashboard-panel cc-actions-panel"><h3>${ccText('Quick actions', '快捷办理')}</h3><div class="cc-quick-actions">
         ${can('workflow.create') ? `<button type="button" data-cc-quick="stocktake"><span aria-hidden="true">▤</span><span>${ccText('Start stocktake request', '发起盘点申请')}</span><b aria-hidden="true">→</b></button>` : ''}

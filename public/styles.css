@@ -1332,7 +1332,8 @@ select.filter-input { height: 38px; cursor: pointer; }
 .cc-overview-card { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 16px; border: 1px solid var(--line); color: var(--muted); text-align: left; cursor: pointer; }
 .cc-overview-card strong { color: var(--ink); font-size: 26px; line-height: 1; }
 .cc-overview-card:hover { border-color: var(--brand); box-shadow: 0 4px 16px rgba(15, 23, 42, .07); }
-.cc-announcement-ticker { display: flex; align-items: center; gap: 10px; min-height: 42px; margin: 14px 0; padding: 0 14px; border: 1px solid #cfe9d9; border-radius: 10px; background: #f3fbf6; color: #175e36; overflow: hidden; }
+/* 2026-10-07：公告条上移到 KPI 卡片之上，紧贴页面标题，故上间距收为 0 */
+.cc-announcement-ticker { display: flex; align-items: center; gap: 10px; min-height: 42px; margin: 0 0 14px; padding: 0 14px; border: 1px solid #cfe9d9; border-radius: 10px; background: #f3fbf6; color: #175e36; overflow: hidden; }
 .cc-ticker-track { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; font-weight: 600; }
 .cc-ticker-content { display: inline-block; padding-left: 100%; animation: cc-ticker-scroll 18s linear infinite; }
 .cc-announcement-ticker:hover .cc-ticker-content { animation-play-state: paused; }
