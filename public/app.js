@@ -303,8 +303,31 @@ const SCREEN_PERMS = {
 const RETIRED_OPERATION_SCREENS = new Set(['dashboard', 'reports', 'storeBiz', 'memberBiz']);
 const HOME_SCREEN_ORDER = ['controlCenter', 'stores', 'db', 'audit', 'accounts', 'account'];
 
+// 2026-10-07：门店「三板块」对店长角色关闭。
+// 背景：店长在旧菜单下会看到「门店管理 / 门店跟进 / 组织与流程设置」，
+// 但这三者都是集团侧职能，与店长日常（审批、任务、公告）无关，且门店档案
+// 与组织架构应由总部维护。这里按角色关闭**界面入口与工作区**，不动 RBAC 权限矩阵：
+//   - 不回收 store.view —— 店长登记会员、提交任务仍需门店列表（refreshStores），
+//     回收会让会员录入整条链路 403。
+//   - 后端接口权限保持原样，集团角色不受影响；需要改数据仍走总部账号。
+const STORE_MANAGER_HIDDEN_SCREENS = new Set(['stores']);
+const STORE_MANAGER_HIDDEN_WORKSPACES = new Set(['storeops', 'governance']);
+
+/** 当前角色是否为门店店长（兼容旧角色名 manager，后端已规范化为 store_manager） */
+function isStoreManager() {
+  const role = state.me && state.me.role;
+  return role === 'store_manager' || role === 'manager';
+}
+
+/** 某个中控工作区对当前账号是否开放（侧栏入口与页内标签页共用此判定） */
+function canAccessWorkspace(key) {
+  if (isStoreManager() && STORE_MANAGER_HIDDEN_WORKSPACES.has(key)) return false;
+  return true;
+}
+
 /** 当前账号能否访问某个页面 */
 function canAccessScreen(name) {
+  if (isStoreManager() && STORE_MANAGER_HIDDEN_SCREENS.has(name)) return false;
   if (RETIRED_OPERATION_SCREENS.has(name) || ['members','rules','mall','approvals','sheets'].includes(name)) return false;
   if (name === 'controlCenter') return ['workflow.view', 'workflow.create', 'workflow.approve', 'workflow.execute', 'task.view', 'task.create', 'org.view'].some(can);
   const perm = SCREEN_PERMS[name];
@@ -323,7 +346,9 @@ async function initApp() {
   $$('.nav-item').forEach(el => {
     const workspacePerms = { approvals: ['workflow.view', 'workflow.create'], collaboration: ['task.view', 'task.create'], storeops: ['task.create', 'store.view', 'alert.view'], governance: ['org.view', 'staff.view', 'workflow.configure', 'system.audit.view'] };
     const needed = workspacePerms[el.dataset.workspace];
-    el.style.display = canAccessScreen(el.dataset.screen) && (!needed || needed.some(can)) ? '' : 'none';
+    // 角色级关闭优先于权限判定：店长的「门店跟进 / 组织与流程设置」入口整体隐藏。
+    const workspaceAllowed = el.dataset.workspace ? canAccessWorkspace(el.dataset.workspace) : true;
+    el.style.display = workspaceAllowed && canAccessScreen(el.dataset.screen) && (!needed || needed.some(can)) ? '' : 'none';
   });
   // 门店列表接口需要 store.view。没有该权限就跳过请求 ——
   // 否则 403 会抛出异常、打断整个 initApp，页面停在半渲染状态。
@@ -914,7 +939,10 @@ async function renderControlCenter(root) {
     ${can('system.audit.view') ? `<section class="cc-section" data-cc-area="governance"><h3>${ccText('Audit events', '操作审计')}</h3><form id="ccAuditFilterForm" class="cc-workflow-filters"><input type="search" name="q" value="${escapeHtml(state.ccAuditFilters?.q || '')}" placeholder="${ccText('Search action, user or record', '搜索操作、人员或记录')}"/><label class="cc-field"><span>${ccText('From', '开始日期')}</span><input type="date" name="from" value="${escapeHtml(state.ccAuditFilters?.from || '')}"/></label><label class="cc-field"><span>${ccText('To', '结束日期')}</span><input type="date" name="to" value="${escapeHtml(state.ccAuditFilters?.to || '')}"/></label><button class="btn btn-sm" type="submit">${ccText('Search', '筛选')}</button><button class="btn btn-sm" type="button" data-audit-reset>${ccText('Reset', '重置')}</button><span class="cc-meta">${ccPageSummary(auditData)}</span></form><div class="cc-list">${auditEvents.length ? auditEvents.map(a => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(a.action)}</strong><span class="cc-meta">${escapeHtml(new Date(a.createdAt).toLocaleString())}</span></div><div class="cc-meta">${escapeHtml(a.actorName)} · ${escapeHtml(a.resourceType)} · ${escapeHtml(a.resourceId || '')}</div></article>`).join('') : `${ccEmptyState(ccText('No V2 audit events', '暂无 V2 操作记录'), ccText('Audit entries will appear here after actions are performed.', '操作发生后，审计记录会显示在这里。'))}`}</div><div class="cc-actions cc-workflow-pager"><button type="button" class="btn btn-sm" data-audit-page="prev" ${auditData.offset <= 0 ? 'disabled' : ''}>${ccText('Previous', '上一页')}</button><button type="button" class="btn btn-sm" data-audit-page="next" ${auditData.offset + auditData.limit >= auditData.total ? 'disabled' : ''}>${ccText('Next', '下一页')}</button></div></section>` : ''}
     <section class="cc-section" data-cc-area="collaboration"><h3>${ccText('Notifications', '通知')} · ${ccText('Unread', '未读')} ${Number(noticeData.unread || 0)}</h3><div class="cc-list">${notices.length ? notices.map(n => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(n.title)}</strong>${!n.readAt ? `<button class="btn btn-sm" data-notice-read="${escapeHtml(n.id)}">${ccText('Mark read', '标为已读')}</button>` : ''}</div><div>${escapeHtml(n.body)}</div><div class="cc-meta">${escapeHtml(new Date(n.createdAt).toLocaleString())}</div></article>`).join('') : `${ccEmptyState(ccText('No notifications', '暂无通知'), ccText('New notifications will appear here.', '有新通知时会显示在这里。'))}`}</div><div class="cc-actions cc-workflow-pager"><span class="cc-meta">${ccPageSummary(noticeData)}</span><button type="button" class="btn btn-sm" data-notice-page="prev" ${noticeData.offset <= 0 ? 'disabled' : ''}>${ccText('Previous', '上一页')}</button><button type="button" class="btn btn-sm" data-notice-page="next" ${noticeData.offset + noticeData.limit >= noticeData.total ? 'disabled' : ''}>${ccText('Next', '下一页')}</button></div></section>`;
 
-  const availableAreas = new Set(Array.from(root.querySelectorAll('[data-cc-area]'), section => section.dataset.ccArea));
+  // 角色级关闭：店长的「门店跟进 / 组织与流程设置」工作区整体移出，
+  // 其 section 不计入 availableAreas → 页内标签页与跳转按钮一并失效（下方统一按此集合判定）。
+  const availableAreas = new Set(Array.from(root.querySelectorAll('[data-cc-area]'), section => section.dataset.ccArea).filter(area => canAccessWorkspace(area)));
+  root.querySelectorAll('[data-cc-area]').forEach(section => { if (!canAccessWorkspace(section.dataset.ccArea)) section.remove(); });
   root.querySelectorAll('[data-cc-tab]').forEach(button => { if (button.dataset.ccTab !== 'overview') button.hidden = !availableAreas.has(button.dataset.ccTab); });
   root.querySelectorAll('[data-cc-jump]').forEach(button => { button.hidden = !availableAreas.has(button.dataset.ccJump); });
   const setWorkspace = key => {
