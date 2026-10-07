@@ -150,3 +150,67 @@
 @media (max-width: 900px) { .app-shell .cc-workspace-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 640px) { .app-shell .cc-quick-actions { grid-template-columns: 1fr; } .app-shell .cc-page-header time { display: none; } .app-shell .cc-overview-grid { gap: 8px; } .app-shell .cc-overview-card { min-height: 100px; padding: 12px; } .app-shell .cc-overview-card strong { font-size: 24px; } .app-shell .cc-dashboard-panel { padding: 16px; } }
 @media (prefers-reduced-motion: reduce) { .app-shell .cc-loading-title, .app-shell .cc-loading-card, .app-shell .cc-loading-panel { animation: none; } }
+
+/* ========== 2026-10-07 公告页「列表优先」布局 ==========
+   页面只承载列表 + 筛选；新建与编辑统一走弹窗。
+   分段控件、筛选栏、结果计数、卡片操作区，均使用既有令牌，无新增颜色。 */
+.app-shell .cc-ann-section { display: block; }
+.app-shell .cc-ann-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 16px; flex-wrap: wrap; margin-bottom: 14px;
+}
+.app-shell .cc-ann-head h3 { margin: 0; }
+.app-shell .cc-ann-head-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+
+.app-shell .cc-segmented {
+  display: inline-flex; gap: 2px; padding: 2px;
+  background: var(--line-soft); border: 1px solid var(--line); border-radius: 10px;
+}
+.app-shell .cc-segmented button {
+  border: 0; background: transparent; cursor: pointer;
+  font: 500 13px/1 inherit; font-family: inherit;
+  color: var(--muted); padding: 8px 14px; border-radius: 8px;
+  transition: background .14s, color .14s;
+}
+.app-shell .cc-segmented button:hover { color: var(--ink); }
+.app-shell .cc-segmented button.on { background: var(--surface); color: var(--brand); box-shadow: 0 1px 2px rgba(16,24,40,.08); }
+.app-shell .cc-segmented button:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+.app-shell .cc-ann-filters {
+  display: flex; align-items: center; gap: 10px;
+  flex-wrap: wrap; margin-bottom: 12px;
+}
+.app-shell .cc-ann-filters input[type="search"] {
+  flex: 1 1 240px; min-width: 0; max-width: 420px;
+  padding: 9px 12px; font: 400 13px/1.5 inherit; font-family: inherit;
+  color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px;
+}
+.app-shell .cc-ann-filters input[type="search"]::placeholder { color: var(--subtle); }
+.app-shell .cc-ann-filters input[type="search"]:focus {
+  outline: 0; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(29,78,216,.13);
+}
+.app-shell .cc-ann-filters select {
+  padding: 9px 12px; font: 400 13px/1.5 inherit; font-family: inherit;
+  color: var(--ink); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 10px; cursor: pointer;
+}
+.app-shell .cc-ann-filters select:focus { outline: 0; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(29,78,216,.13); }
+
+.app-shell .cc-ann-resultbar {
+  font-size: 12px; color: var(--subtle); padding: 0 2px 10px;
+}
+.app-shell .cc-ann-item-actions { margin-top: 12px; display: flex; gap: 8px; }
+.app-shell .cc-announcement-item .cc-card-top { align-items: flex-start; gap: 12px; }
+.app-shell .cc-pin { margin-right: 2px; }
+.app-shell .cc-inline-check {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: 13px; color: var(--ink-2); cursor: pointer;
+}
+.app-shell[data-theme="dark"] .cc-segmented { background: var(--line-soft); }
+.app-shell[data-theme="dark"] .cc-segmented button.on { background: var(--surface); }
+@media (max-width: 640px) {
+  .app-shell .cc-ann-head { align-items: flex-start; }
+  .app-shell .cc-ann-head-actions { width: 100%; justify-content: space-between; }
+  .app-shell .cc-ann-filters input[type="search"] { max-width: none; }
+}

@@ -93,8 +93,13 @@ button, input, select, textarea { font-family: inherit; }
 .mono { font-family: 'Inter', 'JetBrains Mono', 'Menlo', monospace; }
 
 /* =================== 登录页（2026-09-25 沉浸式居中版：全屏照片整体压暗 + 单一中央轴线
-   logo → 中文主标题 → 英文字距副题 → 深色半透明面板；绿色只出现在按钮/焦点等交互元素） =================== */
+   logo → 中文主标题 → 英文字距副题 → 深色半透明面板）
+   2026-10-07 主色统一：交互色由品牌绿改为中控平台主色蓝 #1D4ED8，与登录后的界面一致。
+   LOGO 与品牌资产保持原绿色（logo-green.png / logo-brand.png），不改动。 =================== */
 .login-page {
+  --login-accent: #2F63E0;          /* 主交互色：按钮、聚焦光环 */
+  --login-accent-strong: #1D4ED8;
+  --login-accent-soft: rgba(47,99,224,.24);
   position: fixed; inset: 0;
   overflow-y: auto;
   background: #0E1F1A;
@@ -128,9 +133,9 @@ button, input, select, textarea { font-family: inherit; }
   letter-spacing: .06em; line-height: 1.3;
   text-shadow: 0 2px 18px rgba(0,0,0,.4);
 }
-/* 主标题末段渐变绿（与按钮同源，仅此一处品牌绿装饰） */
+/* 主标题末段：改用主色蓝，与登录后界面的品牌色一致 */
 .login-title-accent {
-  background: linear-gradient(100deg, #2FA36A 0%, #5BC98A 100%);
+  background: linear-gradient(100deg, #4C7EF0 0%, #7BA6F5 100%);
   -webkit-background-clip: text; background-clip: text;
   -webkit-text-fill-color: transparent; color: transparent;
 }
@@ -173,11 +178,11 @@ button, input, select, textarea { font-family: inherit; }
   outline: none; transition: border-color .15s, background .15s, box-shadow .15s;
 }
 .login-panel input::placeholder { color: rgba(255,255,255,.42); }
-/* 焦点 = 唯一允许的绿色交互态之一 */
+/* 焦点 = 主交互色 */
 .login-panel input:focus {
   background: rgba(255,255,255,.10);
-  border-color: rgba(76,196,124,.85);
-  box-shadow: 0 0 0 3px rgba(34,155,86,.22);
+  border-color: rgba(120,158,240,.9);
+  box-shadow: 0 0 0 3px var(--login-accent-soft);
 }
 .login-panel input[name=password] { padding-right: 46px; }
 /* 密码显示/隐藏 */
@@ -193,11 +198,11 @@ button, input, select, textarea { font-family: inherit; }
 .pwd-toggle.showing .eye-open { display: none; }
 .pwd-toggle.showing .eye-closed { display: block; }
 .login-error { color: #FCA5A5; font-size: 12px; min-height: 16px; letter-spacing: .02em; }
-/* 登录按钮：品牌绿渐变实心（页面唯一大面积绿色），48px、登 录 居中、箭头 ::after（不受 loading textContent 影响） */
+/* 登录按钮：主色蓝渐变实心，48px、登 录 居中、箭头 ::after（不受 loading textContent 影响） */
 .login-submit {
   position: relative;
   height: 48px; border: none; border-radius: 10px;
-  background: linear-gradient(92deg, #1E8F52 0%, #2FA36A 55%, #43B878 100%);
+  background: linear-gradient(92deg, var(--login-accent-strong) 0%, var(--login-accent) 100%);
   color: #FFFFFF; font-size: 15px; font-weight: 600; letter-spacing: .5em; text-indent: .5em;
   cursor: pointer; transition: filter .15s, transform .06s, box-shadow .15s;
 }
@@ -205,7 +210,7 @@ button, input, select, textarea { font-family: inherit; }
   content: '→'; position: absolute; right: 20px; top: 50%; transform: translateY(-50%);
   font-size: 16px; letter-spacing: 0; text-indent: 0; opacity: .9;
 }
-.login-submit:hover { filter: brightness(1.08); box-shadow: 0 8px 22px -8px rgba(34,155,86,.55); }
+.login-submit:hover { filter: brightness(1.1); box-shadow: 0 8px 22px -8px rgba(29,78,216,.6); }
 .login-submit:active { transform: scale(.985); filter: brightness(.97); }
 .login-submit:disabled { opacity: .65; cursor: not-allowed; transform: none; }
 /* ≤768px：同一中轴整体缩放，面板贴宽、允许纵向滚动 */
