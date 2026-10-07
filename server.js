@@ -2056,7 +2056,7 @@ app.post('/api/v2/users', (req, res) => {
   if (!guard.checkPerm(req, res, 'system.user.edit')) return;
   const b = req.body || {}, username = controlCenter.cleanText(b.username, 48), name = controlCenter.cleanText(b.name, 120);
   const password = String(b.password || ''), role = String(b.role || '');
-  const allowedRoles = ['admin','owner','hq_operator','philippines_manager','regional_manager','manager','sales','warehouse','service'];
+  const allowedRoles = ['admin','owner','hq_operator','philippines_manager','regional_manager','purchaser','manager','sales','warehouse','service'];
   if (!/^[a-zA-Z0-9_]{3,48}$/.test(username)) return res.status(400).json({ error: '用户名须为 3 至 48 位英文字母、数字或下划线' });
   if (!name || password.length < 6) return res.status(400).json({ error: '请填写姓名，并设置至少 6 位的初始密码' });
   if (!allowedRoles.includes(role)) return res.status(400).json({ error: '角色无效' });
@@ -2215,7 +2215,7 @@ app.put('/api/v2/workflows/definitions/:type', (req, res) => {
   if (!steps.length || steps.length > 10) return res.status(400).json({ error: '审批步骤须为 1 至 10 步' });
   const slaHours = b.slaHours == null || b.slaHours === '' ? null : Number(b.slaHours);
   if (slaHours !== null && (!Number.isInteger(slaHours) || slaHours < 1 || slaHours > 720)) return res.status(400).json({ error: '审批时限须为 1 至 720 小时；留空表示不设时限' });
-  const validRoles = ['admin','owner','hq_operator','philippines_manager','regional_manager','store_manager','sales','warehouse','service'];
+  const validRoles = ['admin','owner','hq_operator','philippines_manager','regional_manager','purchaser','store_manager','sales','warehouse','service'];
   const activeUsers = readAll('users') || [];
   const normalized = [];
   for (const step of steps) {
@@ -2823,10 +2823,168 @@ app.post('/api/v2/store-issues/:id/close', (req, res) => {
   if (!guard.check(req, res, 'alert.close', item)) return;
   return res.status(410).json({ error: '独立问题关闭已停用。请在门店整改流程中上传本轮凭证并完成复查。历史问题记录仅供查看。' });
 });
+// ============ 采购跟单（2026-10-07 新增）============
+// 一个「批次/船期」一条记录：采购员跟进国内下单 → 备货 → 开船 → 在��� →
+// 到港 → 清关 → 入库，需要高频实时更新。
+// 阶段顺序即数组下标，前端据此画进度条；服务端只接受已定义阶段，
+// 且**不允许阶段倒退**（避免把已入库的批次误改回在途）。
+const PURCHASE_STAGES = ['ordered', 'preparing', 'loaded', 'in_transit', 'arrived', 'customs', 'warehoused'];
+const purchaseAttachmentDir = path.join(store.DATA_DIR, 'uploads', 'purchase-shipments');
+function normalizePurchaseStage(value) {
+  const v = String(value || '').trim();
+  return PURCHASE_STAGES.includes(v) ? v : '';
+}
+app.get('/api/v2/purchase-shipments', (req, res) => {
+  if (!guard.checkPerm(req, res, 'purchase.view')) return;
+  const all = readAll('purchaseShipments') || [];
+  const q = controlCenter.cleanText(req.query.q, 120).toLowerCase();
+  const stage = normalizePurchaseStage(req.query.stage);
+  const filtered = all.filter(x => {
+    if (stage && x.stage !== stage) return false;
+    if (!q) return true;
+    return [x.orderNo, x.supplier, x.vessel, x.blNo, x.portOfLoading, x.portOfDischarge, x.ownerName]
+      .some(v => String(v || '').toLowerCase().includes(q));
+  })
+    .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')));
+  const total = filtered.length;
+  const limit = Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || 20));
+  const rawOffset = Math.max(0, parseInt(req.query.offset, 10) || 0);
+  const offset = total ? Math.min(rawOffset, Math.floor((total - 1) / limit) * limit) : 0;
+  const countsByStage = {};
+  for (const s of PURCHASE_STAGES) countsByStage[s] = all.filter(x => x.stage === s).length;
+  res.json({
+    items: filtered.slice(offset, offset + limit),
+    total, offset, limit, countsByStage,
+    stages: PURCHASE_STAGES,
+    inTransitTotal: all.filter(x => ['ordered','preparing','loaded','in_transit'].includes(x.stage)).length,
+  });
+});
+app.post('/api/v2/purchase-shipments', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'purchase.create')) return;
+  const b = req.body || {};
+  const orderNo = controlCenter.cleanText(b.orderNo, 80);
+  const supplier = controlCenter.cleanText(b.supplier, 160);
+  if (!orderNo) return res.status(400).json({ error: '请填写订单号' });
+  if (!supplier) return res.status(400).json({ error: '请填写供应商' });
+  const stage = normalizePurchaseStage(b.stage || 'ordered');
+  if (!stage) return res.status(400).json({ error: '请选择有效的物流阶段' });
+  const items = readAll('purchaseShipments') || [];
+  if (items.some(x => x.orderNo && x.orderNo.toLowerCase() === orderNo.toLowerCase() && x.stage !== 'warehoused')) {
+    return res.status(409).json({ error: '该订单号已有在途批次，如需分批请在原批次上更新或使用区分后缀' });
+  }
+  const etd = controlCenter.cleanText(b.etd, 10), eta = controlCenter.cleanText(b.eta, 10), arrivalDate = controlCenter.cleanText(b.arrivalDate, 10);
+  for (const [label, value] of [['ETD 开船日', etd], ['ETA 到港日', eta], ['到港日期', arrivalDate]]) {
+    if (value && !isIsoCalendarDate(value)) return res.status(400).json({ error: `${label}无效` });
+  }
+  const item = {
+    id: nanoid(),
+    orderNo, supplier,
+    vessel: controlCenter.cleanText(b.vessel, 120),
+    blNo: controlCenter.cleanText(b.blNo, 80),
+    containerNo: controlCenter.cleanText(b.containerNo, 80),
+    portOfLoading: controlCenter.cleanText(b.portOfLoading, 120),
+    portOfDischarge: controlCenter.cleanText(b.portOfDischarge, 120),
+    productName: controlCenter.cleanText(b.productName, 200),
+    quantity: controlCenter.cleanText(b.quantity, 60),
+    amount: b.amount === '' || b.amount == null ? null : Number(b.amount),
+    etd, eta, arrivalDate,
+    stage,
+    note: controlCenter.cleanText(b.note, 2000),
+    ownerId: controlCenter.cleanText(b.ownerId, 60) || u.id,
+    ownerName: controlCenter.cleanText(b.ownerName, 80) || (u.name || u.username),
+    createdBy: u.id, createdByName: u.name || u.username,
+    createdAt: nowIso(), updatedAt: nowIso(),
+    stageHistory: [{ stage, at: nowIso(), byName: u.name || u.username, note: '' }],
+    attachments: [],
+  };
+  if (item.amount !== null && (!Number.isFinite(item.amount) || item.amount < 0)) return res.status(400).json({ error: '金额须为不小于 0 的数字' });
+  items.unshift(item);
+  writeAll('purchaseShipments', items);
+  recordControlAudit(req, u, 'purchaseShipment.create', 'purchaseShipment', item.id, { stage });
+  res.status(201).json({ item });
+});
+app.post('/api/v2/purchase-shipments/:id', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'purchase.edit')) return;
+  const items = readAll('purchaseShipments') || [], item = items.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '采购批次不存在' });
+  if (!guard.check(req, res, 'purchase.edit', item)) return;
+  const b = req.body || {};
+  const previousStage = item.stage;
+  if (b.stage !== undefined) {
+    const stage = normalizePurchaseStage(b.stage);
+    if (!stage) return res.status(400).json({ error: '请选择有效的物流阶段' });
+    const fromIndex = PURCHASE_STAGES.indexOf(previousStage), toIndex = PURCHASE_STAGES.indexOf(stage);
+    if (toIndex < fromIndex) return res.status(400).json({ error: '物流阶段不能倒退。如需修正请新建一条更正记录。' });
+    item.stage = stage;
+  }
+  for (const key of ['vessel','blNo','containerNo','portOfLoading','portOfDischarge','productName','quantity','orderNo','supplier']) {
+    if (b[key] !== undefined) item[key] = controlCenter.cleanText(b[key], key === 'productName' ? 200 : 160);
+  }
+  if (b.amount !== undefined) {
+    const amount = b.amount === '' || b.amount == null ? null : Number(b.amount);
+    if (amount !== null && (!Number.isFinite(amount) || amount < 0)) return res.status(400).json({ error: '金额须为不小于 0 的数字' });
+    item.amount = amount;
+  }
+  for (const [key, label] of [['etd','ETD 开船日'],['eta','ETA 到港日'],['arrivalDate','到港日期']]) {
+    if (b[key] !== undefined) {
+      const value = controlCenter.cleanText(b[key], 10);
+      if (value && !isIsoCalendarDate(value)) return res.status(400).json({ error: `${label}无效` });
+      item[key] = value;
+    }
+  }
+  if (b.note !== undefined) item.note = controlCenter.cleanText(b.note, 2000);
+  if (item.stage !== previousStage) {
+    item.stageHistory = Array.isArray(item.stageHistory) ? item.stageHistory : [];
+    item.stageHistory.push({ stage: item.stage, at: nowIso(), byName: u.name || u.username, note: controlCenter.cleanText(b.stageNote, 500) });
+  }
+  item.updatedAt = nowIso();
+  writeAll('purchaseShipments', items);
+  recordControlAudit(req, u, 'purchaseShipment.update', 'purchaseShipment', item.id, { from: previousStage, to: item.stage });
+  res.json({ item });
+});
+app.post('/api/v2/purchase-shipments/:id/attachments', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'purchase.edit')) return;
+  const items = readAll('purchaseShipments') || [], item = items.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '采购批次不存在' });
+  if (!guard.check(req, res, 'purchase.edit', item)) return;
+  const { fileName, mimeType, data } = req.body || {};
+  const type = workflowAttachmentTypes[String(mimeType || '').toLowerCase()];
+  if (!type || !['application/pdf','image/png','image/jpeg'].includes(String(mimeType).toLowerCase()) || typeof data !== 'string' || data.length > 5_600_000) return res.status(400).json({ error: '凭证仅支持 4MB 以内的 PDF、PNG 或 JPG 文件' });
+  const match = data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match || match[1].toLowerCase() !== String(mimeType).toLowerCase()) return res.status(400).json({ error: '附件格式无效' });
+  const buffer = Buffer.from(match[2], 'base64');
+  if (!buffer.length || buffer.length > 4 * 1024 * 1024 || !type.signature(buffer)) return res.status(400).json({ error: '文件内容与格式不匹配或超过 4MB' });
+  item.attachments = Array.isArray(item.attachments) ? item.attachments : [];
+  if (item.attachments.length >= 10 || item.attachments.reduce((sum, x) => sum + Number(x.size || 0), 0) + buffer.length > 20 * 1024 * 1024) return res.status(409).json({ error: '每个批次最多 10 个凭证，合计不超过 20MB' });
+  fs.mkdirSync(purchaseAttachmentDir, { recursive: true, mode: 0o700 }); fs.chmodSync(purchaseAttachmentDir, 0o700);
+  const id = nanoid(), storedName = `${id}${type.ext}`;
+  fs.writeFileSync(path.join(purchaseAttachmentDir, storedName), buffer, { mode: 0o600, flag: 'wx' });
+  const safeName = path.basename(String(fileName || 'attachment')).replace(/[\\/\r\n\0]/g, '_').slice(0, 180) || `attachment${type.ext}`;
+  const attachment = { id, name: safeName, mimeType: String(mimeType).toLowerCase(), size: buffer.length, storedName, uploadedBy: u.id, uploadedByName: u.name || u.username, createdAt: nowIso() };
+  item.attachments.push(attachment); item.updatedAt = attachment.createdAt; writeAll('purchaseShipments', items);
+  recordControlAudit(req, u, 'purchaseShipment.attachment.upload', 'purchaseShipment', item.id, { attachmentId: id, size: buffer.length });
+  res.status(201).json({ attachment });
+});
+app.get('/api/v2/purchase-shipments/:id/attachments/:attachmentId/download', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'purchase.view')) return;
+  const items = readAll('purchaseShipments') || [], item = items.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '采购批次不存在' });
+  if (!guard.check(req, res, 'purchase.view', item)) return;
+  const attachment = (item.attachments || []).find(x => x.id === req.params.attachmentId);
+  if (!attachment) return res.status(404).json({ error: '凭证不存在' });
+  const filePath = path.join(purchaseAttachmentDir, path.basename(attachment.storedName));
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: '凭证文件已不存在' });
+  const asciiName = attachment.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
+  res.set({ 'Content-Type': workflowAttachmentTypes[attachment.mimeType]?.ext ? attachment.mimeType : 'application/octet-stream', 'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(attachment.name)}`, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
+  res.sendFile(filePath);
+});
 app.get('/api/v2/task-assignees', (req, res) => {
   if (!guard.checkPerm(req, res, 'task.assign')) return;
-  const actor = getSessionUser(req);
-  const users = (readAll('users') || []).filter(x => !x.disabled && rbac.canAssign(actor, x, 'task').ok).filter(x => controlVisible(req, 'task.assign', { storeId: x.storeId, country: 'PH', createdBy: x.id }));
+  const actor = getSessionUser(req);  const users = (readAll('users') || []).filter(x => !x.disabled && rbac.canAssign(actor, x, 'task').ok).filter(x => controlVisible(req, 'task.assign', { storeId: x.storeId, country: 'PH', createdBy: x.id }));
   res.json({ items: users.map(x => ({ id: x.id, name: x.name || x.username, username: x.username, storeId: x.storeId || null })) });
 });
 app.get('/api/v2/alert-assignees', (req, res) => {

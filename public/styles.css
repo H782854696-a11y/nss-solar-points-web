@@ -235,6 +235,32 @@ button, input, select, textarea { font-family: inherit; }
   }
 }
 
+/* ============ 采购跟单（2026-10-07）============
+   七段进度条：done=已走过、current=当前段、todo=未到段。
+   窄屏用 flex-wrap 并在 ≤700px 隐去非当前段标签，避免挤压。 */
+.cc-purchase-bar { display: flex; flex-wrap: wrap; gap: 4px; margin: 10px 0 8px; }
+.cc-purchase-step { display: flex; align-items: center; gap: 4px; flex: 1 1 auto; min-width: 0; }
+.cc-purchase-step i { display: block; height: 4px; border-radius: 2px; background: #dfe7e3; flex: 1 1 12px; min-width: 10px; }
+.cc-purchase-step em { font-style: normal; white-space: nowrap; font-size: 10.5px; color: var(--muted); }
+.cc-purchase-step.done i { background: var(--brand); }
+.cc-purchase-step.done em { color: var(--brand); }
+.cc-purchase-step.current i { background: var(--brand); box-shadow: 0 0 0 2px rgba(18,104,61,.16); }
+.cc-purchase-step.current em { color: var(--ink); font-weight: 700; }
+.cc-purchase-note { margin: 6px 0; padding: 8px 10px; border-left: 3px solid var(--brand); background: #f6faf8; border-radius: 0 6px 6px 0; font-size: 12.5px; }
+.cc-purchase-overdue { color: #b42318; font-weight: 600; }
+.cc-purchase-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.cc-purchase-card { border-left: 3px solid var(--brand); }
+/* 新增批次表单默认折叠：采购员日常是「看进度」而不是「填表」，
+   表单展开时占位 731px，比批次列表还高，会把要看的记录挤到屏幕外。 */
+.cc-purchase-new { margin: 10px 0 4px; border: 1px dashed #cfe3d7; border-radius: 10px; background: #fbfdfc; }
+.cc-purchase-new > summary { cursor: pointer; padding: 11px 14px; font-weight: 700; color: var(--brand); list-style: none; user-select: none; }
+.cc-purchase-new > summary::-webkit-details-marker { display: none; }
+.cc-purchase-new > summary::before { content: '＋ '; font-weight: 700; }
+.cc-purchase-new[open] > summary { border-bottom: 1px solid #e6f0ea; margin-bottom: 12px; }
+.cc-purchase-new[open] > summary::before { content: '－ '; }
+.cc-purchase-new > form { padding: 0 14px 14px; }
+@media (max-width: 700px) { .cc-purchase-step em { display: none; } .cc-purchase-step.current em { display: inline; } }
+
 /* =================== App Shell =================== */
 .app-shell { display: flex; height: 100vh; overflow: hidden; }
 

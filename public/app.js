@@ -269,6 +269,7 @@ const ROLE_LABEL_KEY = {
   philippines_manager: 'role.ph', regional_manager: 'role.region',
   store_manager: 'role.manager', sales: 'role.sales',
   warehouse: 'role.warehouse', service: 'role.service',
+  purchaser: 'role.purchaser',
 };
 function roleLabel(role) {
   const k = ROLE_LABEL_KEY[role];
@@ -329,6 +330,9 @@ function isStoreManager() {
 /** 某个中控工作区对当前账号是否开放（侧栏入口与页内标签页共用此判定） */
 function canAccessWorkspace(key) {
   if (isStoreManager() && STORE_MANAGER_HIDDEN_WORKSPACES.has(key)) return false;
+  // 采购跟单（2026-10-07）：按权限开放，未授予 purchase.view 的账号
+  // （店长、销售、仓管、售后等）既看不到侧栏入口，也进不去工作区。
+  if (key === 'purchasing') return can('purchase.view');
   return true;
 }
 
@@ -336,7 +340,7 @@ function canAccessWorkspace(key) {
 function canAccessScreen(name) {
   if (isStoreManager() && STORE_MANAGER_HIDDEN_SCREENS.has(name)) return false;
   if (RETIRED_OPERATION_SCREENS.has(name) || ['members','rules','mall','approvals','sheets'].includes(name)) return false;
-  if (name === 'controlCenter') return ['workflow.view', 'workflow.create', 'workflow.approve', 'workflow.execute', 'task.view', 'task.create', 'org.view'].some(can);
+  if (name === 'controlCenter') return ['workflow.view', 'workflow.create', 'workflow.approve', 'workflow.execute', 'task.view', 'task.create', 'org.view', 'purchase.view'].some(can);
   const perm = SCREEN_PERMS[name];
   if (!perm) return true;
   return can(perm);
@@ -773,7 +777,12 @@ async function renderControlCenter(root) {
   if (state.ccAuditFilters?.from) auditQuery.set('from', state.ccAuditFilters.from);
   if (state.ccAuditFilters?.to) auditQuery.set('to', state.ccAuditFilters.to);
   const storeOperationQuery = new URLSearchParams({ limit: '10', reportsOffset: String(state.storeOperationOffsets?.reports || 0), inspectionsOffset: String(state.storeOperationOffsets?.inspections || 0), issuesOffset: String(state.storeOperationOffsets?.issues || 0) });
-  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, auditData, operationData, accountData, announcementData, recentWorkflowData, recentTaskData] = await Promise.all([
+  // 采购跟单筛选（2026-10-07）：与后端 PURCHASE_STAGES 顺序一致，索引即进度条步数
+  const PURCHASE_STAGES = ['ordered', 'preparing', 'loaded', 'in_transit', 'arrived', 'customs', 'warehoused'];
+  const purchaseQuery = new URLSearchParams({ limit: '20', offset: String(state.purchaseOffset || 0) });
+  if (state.purchaseFilters?.q) purchaseQuery.set('q', state.purchaseFilters.q);
+  if (state.purchaseFilters?.stage) purchaseQuery.set('stage', state.purchaseFilters.stage);
+  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, auditData, operationData, accountData, announcementData, recentWorkflowData, recentTaskData, purchaseData] = await Promise.all([
     mayViewWorkflows ? GET(`/api/v2/workflows?${workflowQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
     can('workflow.configure') ? GET('/api/v2/workflows/definitions') : Promise.resolve({ items: [] }),
     mayViewTasks ? GET(`/api/v2/tasks?${taskQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
@@ -788,6 +797,7 @@ async function renderControlCenter(root) {
     GET('/api/v2/announcements?includeDrafts=1'),
     mayViewWorkflows ? GET('/api/v2/workflows?limit=10&offset=0') : Promise.resolve({ items: [] }),
     mayViewTasks ? GET('/api/v2/tasks?limit=10&offset=0') : Promise.resolve({ items: [] }),
+    can('purchase.view') ? GET(`/api/v2/purchase-shipments?${purchaseQuery.toString()}`).catch(() => ({ items: [], total: 0, offset: 0, limit: 20, countsByStage: {}, stages: PURCHASE_STAGES, inTransitTotal: 0 })) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 20, countsByStage: {}, stages: PURCHASE_STAGES, inTransitTotal: 0 }),
   ]);
   if (mayViewWorkflows) state.workflowOffset = Number(workflowData.offset || 0);
   if (mayViewTasks) state.taskOffset = Number(taskData.offset || 0);
@@ -824,13 +834,63 @@ async function renderControlCenter(root) {
   const assignees = assigneeData.items || [];
   const auditEvents = auditData.items || [];
   const storeReports = operationData.reports || [], storeInspections = operationData.inspections || [], storeIssues = operationData.issues || [];
+  const purchaseItems = purchaseData.items || [], purchaseTotal = Number(purchaseData.total || 0);
+  const purchaseOffset = Number(purchaseData.offset || 0), purchaseLimit = Number(purchaseData.limit || 20);
+  const purchaseStageCounts = purchaseData.countsByStage || {};
+  const purchaseInTransit = Number(purchaseData.inTransitTotal || 0);
   const stat = uiStat;
   const taskCounts = taskData.counts || {};
+  // ============ 采购跟单渲染（2026-10-07）============
+  const purchaseStageLabel = stage => ccText(
+    { ordered:'Order placed', preparing:'Preparing / QC', loaded:'Loaded on vessel', in_transit:'In transit at sea', arrived:'Arrived at port', customs:'Clearing customs', warehoused:'Warehoused' }[stage] || stage || '—',
+    { ordered:'已下单', preparing:'备货验货', loaded:'已开船', in_transit:'海运在途', arrived:'已到港', customs:'清关中', warehoused:'已入库' }[stage] || stage || '—');
+  /** 七段进度条：已完成段实心、当前段高亮、未到段留空 */
+  const purchaseStageBar = current => {
+    const idx = PURCHASE_STAGES.indexOf(current);
+    return `<div class="cc-purchase-bar" role="img" aria-label="${escapeHtml(purchaseStageLabel(current))}">${PURCHASE_STAGES.map((s, i) => {
+      const cls = i < idx ? 'done' : i === idx ? 'current' : 'todo';
+      return `<span class="cc-purchase-step ${cls}"><i></i><em>${escapeHtml(purchaseStageLabel(s))}</em></span>`;
+    }).join('')}</div>`;
+  };
+  const renderPurchaseCard = x => {
+    const amount = x.amount == null ? '' : ` · ${ccText('Amount', '金额')} ${Number(x.amount).toLocaleString('zh-CN')}`;
+    const vessel = [x.vessel, x.blNo ? `${ccText('B/L', '提单号')} ${x.blNo}` : '', x.containerNo ? `${ccText('Container', '柜号')} ${x.containerNo}` : ''].filter(Boolean).join(' · ');
+    const route = [x.portOfLoading, x.portOfDischarge].filter(Boolean).join(' → ');
+    const dates = [
+      x.etd ? `${ccText('ETD', '开船')} ${x.etd}` : '',
+      x.eta ? `${ccText('ETA', '预计到港')} ${x.eta}` : '',
+      x.arrivalDate ? `${ccText('Arrived', '到港')} ${x.arrivalDate}` : '',
+    ].filter(Boolean).join(' · ');
+    const overdue = x.eta && !x.arrivalDate && x.stage !== 'warehoused' && new Date(x.eta) < new Date();
+    return `<article class="card cc-card cc-purchase-card" data-purchase-id="${escapeHtml(x.id)}">
+      <div class="cc-card-top">
+        <strong>${escapeHtml(x.orderNo || '—')}</strong>
+        <span class="cc-status cc-status-${x.stage === 'warehoused' ? 'success' : x.stage === 'customs' || x.stage === 'arrived' ? 'warning' : 'brand'}"><i aria-hidden="true"></i>${escapeHtml(purchaseStageLabel(x.stage))}</span>
+      </div>
+      <div class="cc-meta">${escapeHtml(x.supplier || '—')}${amount}${x.productName ? ` · ${escapeHtml(x.productName)}` : ''}${x.quantity ? ` · ${escapeHtml(x.quantity)}` : ''}</div>
+      ${purchaseStageBar(x.stage)}
+      ${vessel ? `<div class="cc-meta">${escapeHtml(vessel)}</div>` : ''}
+      ${route ? `<div class="cc-meta">${escapeHtml(route)}</div>` : ''}
+      ${dates ? `<div class="cc-meta ${overdue ? 'cc-purchase-overdue' : ''}">${escapeHtml(dates)}${overdue ? ` · ${ccText('Overdue', '已逾期')}` : ''}</div>` : ''}
+      ${x.note ? `<div class="cc-purchase-note">${escapeHtml(x.note)}</div>` : ''}
+      <div class="cc-meta">${escapeHtml(x.ownerName || '—')} · ${escapeHtml(new Date(x.updatedAt || x.createdAt).toLocaleString())}</div>
+      ${(x.attachments || []).length ? `<div class="cc-purchase-files">${x.attachments.map(a => `<button type="button" class="btn btn-sm" data-purchase-file="${escapeHtml(x.id)}:${escapeHtml(a.id)}">${escapeHtml(a.name)}</button>`).join('')}</div>` : ''}
+      ${can('purchase.edit') && x.stage !== 'warehoused' ? `<div class="cc-actions"><button type="button" class="btn btn-sm btn-primary" data-purchase-advance="${escapeHtml(x.id)}">${ccText('Update shipping status', '更新物流进度')}</button></div>` : ''}
+    </article>`;
+  };
+  const purchasePager = `<div class="cc-actions cc-workflow-pager"><span class="cc-meta">${ccText('Total', '共')} ${purchaseTotal} · ${ccText('In transit', '在途')} ${purchaseInTransit}</span><button type="button" class="btn btn-sm" data-purchase-page="prev" ${purchaseOffset <= 0 ? 'disabled' : ''}>${ccText('Previous',' 上一页')}</button><button type="button" class="btn btn-sm" data-purchase-page="next" ${purchaseOffset + purchaseLimit >= purchaseTotal ? 'disabled' : ''}>${ccText('Next',' 下一页')}</button></div>`;
   const activeWorkflowTotal = Object.keys(ACTIVE_CONTROL_TYPES).reduce((sum, type) => sum + Object.values(workflowData.countsByType?.[type] || {}).reduce((n, v) => n + Number(v || 0), 0), 0);
   const activeWorkflowStatusCount = status => Object.keys(ACTIVE_CONTROL_TYPES).reduce((sum, type) => sum + Number(workflowData.countsByType?.[type]?.[status] || 0), 0);
   const workspaceStats = {
     approvals: mayViewWorkflows ? [stat(ccText('My pending approvals', '待我审批'), workflowData.pendingForMe, 'warning'), stat(ccText('Current process requests', '当前流程申请'), workflowData.countsByType ? activeWorkflowTotal : null, 'brand'), stat(ccText('Completed', '已完成'), workflowData.countsByType ? activeWorkflowStatusCount('completed') : null, 'success'), stat(ccText('Returned or rejected', '退回或驳回'), workflowData.countsByType ? activeWorkflowStatusCount('returned') + activeWorkflowStatusCount('rejected') : null, 'danger')].join('') : '',
     collaboration: mayViewTasks ? [stat(ccText('Open', '待处理'), taskCounts.open, 'warning'), stat(ccText('In progress', '进行中'), taskCounts.in_progress, 'brand'), stat(ccText('Completed', '已完成'), taskCounts.completed, 'success'), stat(ccText('Cancelled', '已取消'), taskCounts.cancelled, 'neutral')].join('') : '',
+    // 采购跟单统计：在途 / 已到港待入库 / 逾期未到 / 已入库
+    purchasing: can('purchase.view') ? [
+      stat(ccText('In transit', '在途'), purchaseInTransit, 'brand'),
+      stat(ccText('Arrived / clearing', '已到港待入库'), (purchaseStageCounts.arrived || 0) + (purchaseStageCounts.customs || 0), 'warning'),
+      stat(ccText('ETA passed, not warehoused', '预计到港已过未入库'), purchaseItems.filter(x => x.eta && !x.arrivalDate && x.stage !== 'warehoused' && new Date(x.eta) < new Date()).length, 'danger'),
+      stat(ccText('Warehoused', '已入库'), purchaseStageCounts.warehoused || 0, 'success'),
+    ].join('') : '',
     announcements: [stat(ccText('Published', '已发布'), announcements.filter(x => x.status === 'published').length, 'success'), stat(ccText('Pinned', '置顶中'), announcements.filter(x => x.status === 'published' && x.pinned).length, 'brand'), ...(can('announcement.manage') ? [stat(ccText('Drafts', '草稿'), announcements.filter(x => x.status === 'draft').length, 'warning')] : [])].join(''),
     storeops: [stat(ccText('Daily reports', '每日汇报'), operationData.pages?.reports?.total, 'brand'), stat(ccText('Inspections', '巡检记录'), operationData.pages?.inspections?.total, 'success'), stat(ccText('Historical issues', '历史问题'), operationData.pages?.issues?.total, 'neutral')].join(''),
     governance: [mayViewOrg ? stat(ccText('Organizations', '组织单位'), orgs.length, 'brand') : '', can('staff.view') ? stat(ccText('Employees', '员工档案'), employees.length, 'neutral') : '', can('workflow.configure') ? stat(ccText('Approval routes', '审批路径'), definitions.length, 'warning') : '', can('system.audit.view') ? stat(ccText('Audit events', '审计事件'), auditData.total, 'success') : ''].join(''),
@@ -965,6 +1025,10 @@ async function renderControlCenter(root) {
     ${can('task.create') ? `<section class="card cc-section" data-cc-area="storeops"><h3>${ccText('Daily store report', '门店每日汇报')}</h3><form id="ccStoreReportForm" class="cc-form-grid">${!state.me.storeId ? `<label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId" required><option value="">—</option>${stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label>` : ''}<label class="cc-field"><span>${ccText('Report date', '汇报日期')}</span><input name="reportDate" type="date" required value="${new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10)}"/></label><label class="cc-field cc-wide"><span>${ccText('Daily summary', '工作内容')}</span><textarea name="summary" rows="2"></textarea></label><label class="cc-field"><span>${ccText('Additional context (no sales or inventory figures)', '其他工作说明（不填销售额或库存数据）')}</span><textarea name="additionalNote" rows="2"></textarea></label><label class="cc-field"><span>${ccText('Incidents', '异常事项')}</span><textarea name="incidents" rows="2"></textarea></label><label class="cc-field cc-wide"><span>${ccText('Evidence (PDF/PNG/JPG, up to 4 MB each)', '凭证（PDF/PNG/JPG，每个不超过 4MB）')}</span><input name="attachments" type="file" multiple accept="application/pdf,image/png,image/jpeg"/></label><div><button class="btn btn-primary">${ccText('Submit report', '提交汇报')}</button></div></form><div class="cc-list">${storeReports.map(renderStoreReportCard).join('') || `<div class="cc-muted">${ccText('No reports yet', '暂无汇报')}</div>`}</div>${storeOperationPager('reports')}</section>` : ''}
     ${can('task.create') ? `<section class="card cc-section" data-cc-area="storeops"><h3>${ccText('Store inspection', '门店巡检')}</h3><form id="ccInspectionForm" class="cc-form-grid">${!state.me.storeId ? `<label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId" required><option value="">—</option>${stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label>` : ''}<label class="cc-field"><span>${ccText('Inspection date', '巡检日期')}</span><input name="inspectionDate" type="date" required value="${new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10)}"/></label><label class="cc-field"><span>${ccText('Result', '结果')}</span><select name="result"><option value="pass">${ccText('Pass', '通过')}</option><option value="attention">${ccText('Needs attention', '需关注')}</option><option value="fail">${ccText('Fail', '不合格')}</option></select></label><label class="cc-field"><span>${ccText('Score (0–100)', '评分（0–100）')}</span><input name="score" type="number" min="0" max="100" step="1"/></label><label class="cc-field"><span>${ccText('Checklist', '检查清单')}</span><textarea name="checklist" rows="3" placeholder="${ccText('One check per line', '每行一项检查内容')}"></textarea></label><label class="cc-field"><span>${ccText('Findings', '发现问题')}</span><textarea name="findings" rows="3"></textarea></label><label class="cc-field cc-wide"><span>${ccText('Evidence (PDF/PNG/JPG, up to 4 MB each)', '凭证（PDF/PNG/JPG，每个不超过 4MB）')}</span><input name="attachments" type="file" multiple accept="application/pdf,image/png,image/jpeg"/></label><div><button class="btn btn-primary">${ccText('Save inspection', '保存巡检')}</button></div></form><div class="cc-list">${storeInspections.map(renderStoreInspectionCard).join('') || `<div class="cc-muted">${ccText('No inspections yet', '暂无巡检记录')}</div>`}</div>${storeOperationPager('inspections')}</section>` : ''}
     ${can('alert.view') ? `<section class="card cc-section" data-cc-area="storeops"><h3>${ccText('Historical store issues (read-only)', '历史门店问题记录（只读）')}</h3><p>${ccText('Use the Store Remediation workflow in the Approval Center for new issues, evidence, review and closure. Existing direct issue records remain available here for reference.', '新问题请在审批中心提交“门店整改”流程，统一办理审批、证据、复查和关闭；既有独立问题记录保留在此只读查阅。')}</p><div class="cc-list">${storeIssues.map(x => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(x.title)}</strong><span class="cc-status">${x.status === 'closed' ? ccText('Closed', '历史已关闭') : ccText('Open · read-only', '未关闭 · 只读历史')}</span></div><div class="cc-meta">${escapeHtml(stores.find(s => s.id === x.storeId)?.name || '')} · ${escapeHtml(x.ownerName || '—')} · ${x.dueAt ? escapeHtml(x.dueAt.slice(0,10)) : ccText('No due date','无期限')}</div><div>${escapeHtml(x.description || '')}</div></article>`).join('') || `<div class="cc-muted">${ccText('No historical issues', '暂无历史记录')}</div>`}</div>${storeOperationPager('issues')}</section>` : ''}
+    ${can('purchase.view') ? `<section class="card cc-section" data-cc-area="purchasing"><h3>${ccText('Purchase & shipment tracking', '采购与海运跟单')}</h3><p class="cc-meta">${ccText('One record per batch or sailing. Update the shipping status as it moves so HQ and the Philippines team always see the latest.', '一个批次 / 船期一条记录。物流每推进一档就更新一次，总部与菲律宾团队始终看到最新状态。')}</p>
+      <form id="ccPurchaseFilterForm" class="cc-task-filters"><input type="search" name="q" value="${escapeHtml(state.purchaseFilters?.q || '')}" placeholder="${ccText('Search order, supplier, vessel or B/L', '搜索订单号、供应商、船名或提单号')}"/><select name="stage"><option value="">${ccText('All stages', '全部阶段')}</option>${PURCHASE_STAGES.map(s => `<option value="${escapeHtml(s)}" ${state.purchaseFilters?.stage === s ? 'selected' : ''}>${escapeHtml(purchaseStageLabel(s))}</option>`).join('')}</select><button class="btn btn-sm" type="submit">${ccText('Search', '筛选')}</button><button class="btn btn-sm" type="button" data-purchase-reset>${ccText('Reset', '重置')}</button><span class="cc-meta">${ccText('In transit', '在途')} <strong>${purchaseInTransit}</strong></span></form>
+      ${can('purchase.create') ? `<details class="cc-purchase-new"><summary>${ccText('Add a new batch', '＋ 新增采购批次')}</summary><form id="ccPurchaseForm" class="cc-form-grid"><label class="cc-field"><span>${ccText('Order number', '订单号')}</span><input name="orderNo" required placeholder="PO-2026-001"/></label><label class="cc-field"><span>${ccText('Supplier', '供应商')}</span><input name="supplier" required/></label><label class="cc-field"><span>${ccText('Product', '货物名称')}</span><input name="productName"/></label><label class="cc-field"><span>${ccText('Quantity', '数量')}</span><input name="quantity" placeholder="500 pcs"/></label><label class="cc-field"><span>${ccText('Amount (CNY)', '金额（人民币）')}</span><input name="amount" type="number" min="0" step="0.01"/></label><label class="cc-field"><span>${ccText('Current stage', '当前阶段')}</span><select name="stage">${PURCHASE_STAGES.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(purchaseStageLabel(s))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('ETD (sailing)', 'ETD 开船日')}</span><input name="etd" type="date"/></label><label class="cc-field"><span>${ccText('ETA (arrival)', 'ETA 预计到港')}</span><input name="eta" type="date"/></label><label class="cc-field"><span>${ccText('Vessel', '船名')}</span><input name="vessel"/></label><label class="cc-field"><span>${ccText('B/L number', '提单号')}</span><input name="blNo"/></label><label class="cc-field"><span>${ccText('Container number', '柜号')}</span><input name="containerNo"/></label><label class="cc-field"><span>${ccText('Port of loading', '起运港')}</span><input name="portOfLoading"/></label><label class="cc-field"><span>${ccText('Port of discharge', '目的港')}</span><input name="portOfDischarge"/></label><label class="cc-field cc-wide"><span>${ccText('Note', '备注')}</span><textarea name="note" rows="2"></textarea></label><div><button class="btn btn-primary">${ccText('Add batch', '新增批次')}</button></div></form></details>` : ''}
+      <div class="cc-list">${purchaseItems.length ? purchaseItems.map(renderPurchaseCard).join('') : ccEmptyState(ccText('No shipment records yet', '暂无采购批次记录'), ccText('Add the first batch above, then update its shipping status as it moves.', '在上方新增第一个批次，之后随物流推进更新状态。'))}</div>${purchasePager}</section>` : ''}
     ${can('system.audit.view') ? `<section class="cc-section" data-cc-area="governance"><h3>${ccText('Audit events', '操作审计')}</h3><form id="ccAuditFilterForm" class="cc-workflow-filters"><input type="search" name="q" value="${escapeHtml(state.ccAuditFilters?.q || '')}" placeholder="${ccText('Search action, user or record', '搜索操作、人员或记录')}"/><label class="cc-field"><span>${ccText('From', '开始日期')}</span><input type="date" name="from" value="${escapeHtml(state.ccAuditFilters?.from || '')}"/></label><label class="cc-field"><span>${ccText('To', '结束日期')}</span><input type="date" name="to" value="${escapeHtml(state.ccAuditFilters?.to || '')}"/></label><button class="btn btn-sm" type="submit">${ccText('Search', '筛选')}</button><button class="btn btn-sm" type="button" data-audit-reset>${ccText('Reset', '重置')}</button><span class="cc-meta">${ccPageSummary(auditData)}</span></form><div class="cc-list">${auditEvents.length ? auditEvents.map(a => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(a.action)}</strong><span class="cc-meta">${escapeHtml(new Date(a.createdAt).toLocaleString())}</span></div><div class="cc-meta">${escapeHtml(a.actorName)} · ${escapeHtml(a.resourceType)} · ${escapeHtml(a.resourceId || '')}</div></article>`).join('') : `${ccEmptyState(ccText('No V2 audit events', '暂无 V2 操作记录'), ccText('Audit entries will appear here after actions are performed.', '操作发生后，审计记录会显示在这里。'))}`}</div><div class="cc-actions cc-workflow-pager"><button type="button" class="btn btn-sm" data-audit-page="prev" ${auditData.offset <= 0 ? 'disabled' : ''}>${ccText('Previous', '上一页')}</button><button type="button" class="btn btn-sm" data-audit-page="next" ${auditData.offset + auditData.limit >= auditData.total ? 'disabled' : ''}>${ccText('Next', '下一页')}</button></div></section>` : ''}
     <section class="cc-section" data-cc-area="collaboration"><h3>${ccText('Notifications', '通知')} · ${ccText('Unread', '未读')} ${Number(noticeData.unread || 0)}</h3><div class="cc-list">${notices.length ? notices.map(n => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(n.title)}</strong>${!n.readAt ? `<button class="btn btn-sm" data-notice-read="${escapeHtml(n.id)}">${ccText('Mark read', '标为已读')}</button>` : ''}</div><div>${escapeHtml(n.body)}</div><div class="cc-meta">${escapeHtml(new Date(n.createdAt).toLocaleString())}</div></article>`).join('') : `${ccEmptyState(ccText('No notifications', '暂无通知'), ccText('New notifications will appear here.', '有新通知时会显示在这里。'))}`}</div><div class="cc-actions cc-workflow-pager"><span class="cc-meta">${ccPageSummary(noticeData)}</span><button type="button" class="btn btn-sm" data-notice-page="prev" ${noticeData.offset <= 0 ? 'disabled' : ''}>${ccText('Previous', '上一页')}</button><button type="button" class="btn btn-sm" data-notice-page="next" ${noticeData.offset + noticeData.limit >= noticeData.total ? 'disabled' : ''}>${ccText('Next', '下一页')}</button></div></section>`;
 
@@ -974,8 +1038,46 @@ async function renderControlCenter(root) {
   root.querySelectorAll('[data-cc-area]').forEach(section => { if (!canAccessWorkspace(section.dataset.ccArea)) section.remove(); });
   root.querySelectorAll('[data-cc-tab]').forEach(button => { if (button.dataset.ccTab !== 'overview') button.hidden = !availableAreas.has(button.dataset.ccTab); });
   root.querySelectorAll('[data-cc-jump]').forEach(button => { button.hidden = !availableAreas.has(button.dataset.ccJump); });
+  // ============ 采购跟单实时刷新（2026-10-07）============
+  // 需求：采购员要「实时更新」物流进度。
+  // 做法：停在采购跟单工作区时每 30 秒静默拉一次；切走即停。
+  // ⚠️ 三个必须注意的点：
+  //   1. 弹窗打开期间不刷新 —— 否则正在填的「本次进展说明」会被冲掉；
+  //   2. 正在输入时不刷新 —— 焦点在 INPUT/TEXTAREA/SELECT 时跳过；
+  //   3. 只在「数据真的变了」时才重绘 —— 否则筛选框会被清空
+  //      （重渲染会丢失焦点与已输入内容）。
+  let purchasePollTimer = null;
+  let purchaseLastSignature = '';
+  const purchaseSignatureOf = list => (list || [])
+    .map(x => `${x.id}:${x.stage}:${x.updatedAt || ''}:${x.vessel || ''}:${x.blNo || ''}:${x.eta || ''}:${x.arrivalDate || ''}:${(x.attachments || []).length}`)
+    .join('|');
+  const stopPurchasePolling = () => {
+    if (purchasePollTimer) { clearInterval(purchasePollTimer); purchasePollTimer = null; }
+  };
+  const purchasePollTick = async () => {
+    if (state.ccWorkspace !== 'purchasing') { stopPurchasePolling(); return; }
+    if (document.querySelector('.modal-root:not(.hidden)')) return;
+    const active = document.activeElement;
+    if (active && /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName)) return;
+    try {
+      const query = new URLSearchParams({ limit: String(purchaseLimit), offset: String(purchaseOffset) });
+      if (state.purchaseFilters?.q) query.set('q', state.purchaseFilters.q);
+      if (state.purchaseFilters?.stage) query.set('stage', state.purchaseFilters.stage);
+      const fresh = await GET(`/api/v2/purchase-shipments?${query.toString()}`);
+      const signature = purchaseSignatureOf(fresh.items);
+      if (signature === purchaseLastSignature) return;
+      purchaseLastSignature = signature;
+      await renderControlCenter(root);
+    } catch (err) { /* 静默失败：轮询不该打扰用户 */ }
+  };
+  const syncPurchasePolling = () => {
+    stopPurchasePolling();
+    if (state.ccWorkspace !== 'purchasing' || !can('purchase.view')) return;
+    purchaseLastSignature = purchaseSignatureOf(purchaseItems);
+    purchasePollTimer = setInterval(purchasePollTick, 30000);
+  };
   const setWorkspace = key => {
-    const requested = ['overview','approvals','collaboration','storeops','governance','announcements'].includes(key) ? key : 'overview';
+    const requested = ['overview','approvals','collaboration','storeops','purchasing','governance','announcements'].includes(key) ? key : 'overview';
     const active = requested !== 'overview' && !availableAreas.has(requested) ? 'overview' : requested;
     root.querySelectorAll('[data-cc-area]').forEach(section => { section.hidden = active === 'overview' || section.dataset.ccArea !== active; });
     root.querySelector('.cc-dashboard-grid').hidden = active !== 'overview';
@@ -983,9 +1085,9 @@ async function renderControlCenter(root) {
     root.querySelector('.cc-announcement-ticker').hidden = active !== 'overview';
     root.querySelector('.cc-page-header').hidden = active !== 'overview';
     root.querySelector('.cc-detail-heading').hidden = active === 'overview';
-    const titles = { approvals: ccText('Approval Center','审批中心'), collaboration: ccText('Tasks & notifications','任务协作'), storeops: ccText('Store follow-up','门店跟进'), governance: ccText('Governance','治理设置'), announcements: ccText('Announcements','内容公告') };
+    const titles = { approvals: ccText('Approval Center','审批中心'), collaboration: ccText('Tasks & notifications','任务协作'), storeops: ccText('Store follow-up','门店跟进'), purchasing: ccText('Purchase & shipment tracking','采购与海运跟单'), governance: ccText('Governance','治理设置'), announcements: ccText('Announcements','内容公告') };
     root.querySelector('#ccDetailTitle').textContent = titles[active] || '';
-    const subtitles = { approvals: ccText('Review and track management requests', '审核和跟进管理申请'), collaboration: ccText('Assign tasks and follow progress', '派发任务并跟进执行'), storeops: ccText('Daily reports, inspections and issues', '每日汇报、巡检与问题跟进'), governance: ccText('Organization, routes and audit', '组织、审批路径与审计'), announcements: ccText('Publish updates to staff', '向员工发布通知与提醒') };
+    const subtitles = { approvals: ccText('Review and track management requests', '审核和跟进管理申请'), collaboration: ccText('Assign tasks and follow progress', '派发任务并跟进执行'), storeops: ccText('Daily reports, inspections and issues', '每日汇报、巡检与问题跟进'), purchasing: ccText('Domestic orders and ocean freight progress', '国内订单与海运物流进度'), governance: ccText('Organization, routes and audit', '组织、审批路径与审计'), announcements: ccText('Publish updates to staff', '向员工发布通知与提醒') };
     root.querySelector('#ccDetailSubtitle').textContent = subtitles[active] || '';
     const stats = root.querySelector('.cc-workspace-stats');
     stats.innerHTML = workspaceStats[active] || '';
@@ -995,11 +1097,15 @@ async function renderControlCenter(root) {
     root.querySelectorAll('[data-cc-tab]').forEach(button => { const selected = button.dataset.ccTab === active; button.classList.toggle('active', selected); button.setAttribute('aria-current', selected ? 'page' : 'false'); });
     state.ccWorkspace = active;
     updateHeaderCrumb();
+    // 只有停在采购跟单区才开轮询；切走即停（syncPurchasePolling 内部已判）
+    syncPurchasePolling();
   };
   const setNavBadge = (id, value) => { const badge = $(id); if (!badge) return; badge.hidden = !Number.isFinite(value) || value <= 0; badge.textContent = Number.isFinite(value) ? String(value) : ''; };
   setNavBadge('#navApprovalCount', mayViewWorkflows ? count(workflowData.pendingForMe) : 0);
   setNavBadge('#navTaskCount', mayViewTasks && taskData.counts ? count(taskData.counts.open || 0) + count(taskData.counts.in_progress || 0) : 0);
   setNavBadge('#navAnnouncementCount', announcements.filter(item => item.status === 'published').length);
+  // 采购跟单徽标：在途批次数（下单/备货/已开船/在途），已入库不再计入
+  setNavBadge('#navPurchaseCount', can('purchase.view') ? purchaseInTransit : 0);
   root.querySelectorAll('[data-cc-retry]').forEach(button => button.addEventListener('click', () => renderControlCenter(root)));
   root.querySelectorAll('[data-cc-tab]').forEach(button => button.addEventListener('click', () => setWorkspace(button.dataset.ccTab)));
   root.querySelectorAll('[data-cc-jump]').forEach(button => button.addEventListener('click', async () => {
@@ -1164,6 +1270,91 @@ async function renderControlCenter(root) {
   };
   bindStoreOperationForm('#ccStoreReportForm', 'report', '/api/v2/store-reports', ['Report submitted', '汇报已提交']);
   bindStoreOperationForm('#ccInspectionForm', 'inspection', '/api/v2/store-inspections', ['Inspection saved', '巡检已保存']);
+  // ============ 采购跟单事件绑定（2026-10-07）============
+  // 附件上传复用门店运营那套 helper（validateStoreOperationFiles /
+  // uploadMimeType / readFileAsDataUrl），不另造轮子。
+  const uploadPurchaseFiles = async (itemId, files) => {
+    for (const file of files) {
+      const mimeType = uploadMimeType(file);
+      await POST(`/api/v2/purchase-shipments/${encodeURIComponent(itemId)}/attachments`, { fileName: file.name, mimeType, data: await readFileAsDataUrl(file, mimeType) });
+    }
+  };
+  $('#ccPurchaseForm', root)?.addEventListener('submit', async e => {
+    e.preventDefault();
+    const fd = new FormData(e.currentTarget);
+    let created = null;
+    try {
+      const files = validateStoreOperationFiles(fd.getAll('attachments'));
+      const payload = Object.fromEntries(fd.entries()); delete payload.attachments;
+      payload.amount = payload.amount === '' ? null : Number(payload.amount);
+      created = (await POST('/api/v2/purchase-shipments', payload)).item;
+      await uploadPurchaseFiles(created.id, files);
+      toast(ccText('Shipment batch created', '采购批次已新增'), 'success');
+      await renderControlCenter(root);
+      // 提交后收起折叠区，让新记录直接出现在列表顶部
+      const wrapper = $('#ccPurchaseForm', root)?.closest('details');
+      if (wrapper) wrapper.open = false;
+    } catch (err) { toast(err.message, 'error'); if (created) await renderControlCenter(root); }
+  });
+  $('#ccPurchaseFilterForm', root)?.addEventListener('submit', e => {
+    e.preventDefault();
+    const data = Object.fromEntries(new FormData(e.currentTarget).entries());
+    state.purchaseFilters = { q: String(data.q || '').trim(), stage: String(data.stage || '') };
+    state.purchaseOffset = 0;
+    renderControlCenter(root);
+  });
+  $$('[data-purchase-reset]', root).forEach(button => button.addEventListener('click', () => {
+    state.purchaseFilters = { q: '', stage: '' }; state.purchaseOffset = 0; renderControlCenter(root);
+  }));
+  $$('[data-purchase-page]', root).forEach(button => button.addEventListener('click', () => {
+    const total = Number(purchaseTotal || 0), limit = Number(purchaseLimit || 20);
+    state.purchaseOffset = button.dataset.purchasePage === 'next'
+      ? Math.min(purchaseOffset + limit, Math.max(0, Math.floor((total - 1) / limit) * limit))
+      : Math.max(0, purchaseOffset - limit);
+    renderControlCenter(root);
+  }));
+  $$('[data-purchase-advance]', root).forEach(button => button.addEventListener('click', () => {
+    const record = purchaseItems.find(x => x.id === button.dataset.purchaseAdvance);
+    if (!record) return;
+    const currentIndex = PURCHASE_STAGES.indexOf(record.stage);
+    // 下拉给出「当前及之后」的阶段：阶段只能前进，后端也会拒绝倒退，
+    // 这里先从交互层就不给误操作的机会。
+    const options = PURCHASE_STAGES.map((s, i) => `<option value="${escapeHtml(s)}" ${i === currentIndex ? 'selected' : ''} ${i < currentIndex ? 'disabled' : ''}>${escapeHtml(purchaseStageLabel(s))}</option>`).join('');
+    const modal = openModal({
+      title: `${ccText('Update shipping status', '更新物流进度')} · ${record.orderNo || ''}`,
+      body: `<div class="cc-form-grid">
+        <label class="cc-field cc-wide"><span>${ccText('Shipping stage', '物流阶段')}</span><select name="stage">${options}</select></label>
+        <label class="cc-field"><span>${ccText('Vessel', '船名')}</span><input name="vessel" value="${escapeHtml(record.vessel || '')}"/></label>
+        <label class="cc-field"><span>${ccText('B/L number', '提单号')}</span><input name="blNo" value="${escapeHtml(record.blNo || '')}"/></label>
+        <label class="cc-field"><span>${ccText('Container number', '柜号')}</span><input name="containerNo" value="${escapeHtml(record.containerNo || '')}"/></label>
+        <label class="cc-field"><span>${ccText('ETA (arrival)', 'ETA 预计到港')}</span><input name="eta" type="date" value="${escapeHtml(record.eta || '')}"/></label>
+        <label class="cc-field"><span>${ccText('Arrival date', '到港日期')}</span><input name="arrivalDate" type="date" value="${escapeHtml(record.arrivalDate || '')}"/></label>
+        <label class="cc-field cc-wide"><span>${ccText('What changed', '本次进展说明')}</span><input name="stageNote" placeholder="${ccText('e.g. vessel departed Xiamen, ETA shifted', '例如：船已离开厦门，预计到港顺延')}"/></label>
+        <label class="cc-field cc-wide"><span>${ccText('Note', '备注')}</span><textarea name="note" rows="2">${escapeHtml(record.note || '')}</textarea></label>
+        <label class="cc-field cc-wide"><span>${ccText('Evidence (PDF/PNG/JPG, up to 4 MB each)', '凭证（PDF/PNG/JPG，每个不超过 4MB）')}</span><input name="attachments" type="file" multiple accept="application/pdf,image/png,image/jpeg"/></label>
+      </div>`,
+      footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccPurchaseSave">${ccText('Save', '保存')}</button>`,
+      wide: true,
+    });
+    $('#ccPurchaseSave', modal).addEventListener('click', async () => {
+      const fd = new FormData($('form', modal) || document.createElement('form'));
+      let files = [];
+      try { files = validateStoreOperationFiles(fd.getAll('attachments')); } catch (err) { toast(err.message, 'error'); return; }
+      const payload = {};
+      for (const [key, value] of fd.entries()) if (key !== 'attachments') payload[key] = value;
+      try {
+        await POST(`/api/v2/purchase-shipments/${encodeURIComponent(record.id)}`, payload);
+        await uploadPurchaseFiles(record.id, files);
+        closeModal();
+        toast(ccText('Shipping status updated', '物流进度已更新'), 'success');
+        await renderControlCenter(root);
+      } catch (err) { toast(err.message, 'error'); }
+    });
+  }));
+  $$('[data-purchase-file]', root).forEach(button => button.addEventListener('click', () => {
+    const [id, attachmentId] = button.dataset.purchaseFile.split(':');
+    window.location.href = `/api/v2/purchase-shipments/${encodeURIComponent(id)}/attachments/${encodeURIComponent(attachmentId)}/download`;
+  }));
   $$('[data-inspection-remediate]', root).forEach(button => button.addEventListener('click', () => {
     const inspection = storeInspections.find(x => x.id === button.dataset.inspectionRemediate); if (!inspection) return;
     const storeName = stores.find(x => x.id === inspection.storeId)?.name || '';
@@ -3856,7 +4047,7 @@ async function renderAccounts(root) {
       <div class="page-spacer"></div>
     </div>
     <div class="cc-workspace-stats">${uiStat(ccText('Total accounts', '账号总数'), items.length, 'brand')}${uiStat(ccText('Enabled', '启用中'), enabledCount, 'success')}${uiStat(ccText('Disabled', '已停用'), items.length - enabledCount, 'neutral')}${uiStat(ccText('Store linked', '关联门店'), storeAccountCount, 'warning')}</div>
-    ${canEdit ? `<section class="card cc-section"><h3>${ccText('Create login account', '创建登录账号')}</h3><p>${ccText('Set a unique username and a temporary password of at least 6 characters. Store and regional roles must be bound to their scope.', '用户名须唯一，初始密码至少 6 位。门店和区域岗位必须绑定对应范围。')}</p><form id="ccAccountForm" class="cc-form-grid"><label class="cc-field"><span>${ccText('Username', '用户名')}</span><input name="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9_]+"/></label><label class="cc-field"><span>${ccText('Full name', '姓名')}</span><input name="name" required maxlength="120"/></label><label class="cc-field"><span>${ccText('Initial password (6+ characters)', '初始密码（至少 6 位）')}</span><input name="password" type="password" required minlength="6" autocomplete="new-password"/></label><label class="cc-field"><span>${ccText('Role', '角色')}</span><select name="role"><option value="owner">${escapeHtml(roleLabel('owner'))}</option><option value="hq_operator">${escapeHtml(roleLabel('hq_operator'))}</option><option value="philippines_manager">${escapeHtml(roleLabel('philippines_manager'))}</option><option value="regional_manager">${escapeHtml(roleLabel('regional_manager'))}</option><option value="manager">${escapeHtml(roleLabel('store_manager'))}</option><option value="sales">${escapeHtml(roleLabel('sales'))}</option><option value="warehouse">${escapeHtml(roleLabel('warehouse'))}</option><option value="service">${escapeHtml(roleLabel('service'))}</option><option value="admin">${escapeHtml(roleLabel('admin'))}</option></select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">${ccText('No store', '不绑定门店')}</option>${state.stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Region', '区域')}</span><select name="regionId"><option value="">${ccText('No region', '不绑定区域')}</option>${accountRegions.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Employee profile', '关联员工档案')}</span><select name="employeeId"><option value="">${ccText('No employee link', '不关联员工')}</option>${accountEmployees.filter(x => !x.userId).map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Phone', '电话')}</span><input name="phone" maxlength="80"/></label><div class="cc-wide"><button class="btn btn-primary" type="submit">${ccText('Create account', '创建账号')}</button></div></form></section>` : ''}
+    ${canEdit ? `<section class="card cc-section"><h3>${ccText('Create login account', '创建登录账号')}</h3><p>${ccText('Set a unique username and a temporary password of at least 6 characters. Store and regional roles must be bound to their scope.', '用户名须唯一，初始密码至少 6 位。门店和区域岗位必须绑定对应范围。')}</p><form id="ccAccountForm" class="cc-form-grid"><label class="cc-field"><span>${ccText('Username', '用户名')}</span><input name="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9_]+"/></label><label class="cc-field"><span>${ccText('Full name', '姓名')}</span><input name="name" required maxlength="120"/></label><label class="cc-field"><span>${ccText('Initial password (6+ characters)', '初始密码（至少 6 位）')}</span><input name="password" type="password" required minlength="6" autocomplete="new-password"/></label><label class="cc-field"><span>${ccText('Role', '角色')}</span><select name="role"><option value="owner">${escapeHtml(roleLabel('owner'))}</option><option value="hq_operator">${escapeHtml(roleLabel('hq_operator'))}</option><option value="philippines_manager">${escapeHtml(roleLabel('philippines_manager'))}</option><option value="regional_manager">${escapeHtml(roleLabel('regional_manager'))}</option><option value="purchaser">${escapeHtml(roleLabel('purchaser'))}</option><option value="manager">${escapeHtml(roleLabel('store_manager'))}</option><option value="sales">${escapeHtml(roleLabel('sales'))}</option><option value="warehouse">${escapeHtml(roleLabel('warehouse'))}</option><option value="service">${escapeHtml(roleLabel('service'))}</option><option value="admin">${escapeHtml(roleLabel('admin'))}</option></select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">${ccText('No store', '不绑定门店')}</option>${state.stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Region', '区域')}</span><select name="regionId"><option value="">${ccText('No region', '不绑定区域')}</option>${accountRegions.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Employee profile', '关联员工档案')}</span><select name="employeeId"><option value="">${ccText('No employee link', '不关联员工')}</option>${accountEmployees.filter(x => !x.userId).map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Phone', '电话')}</span><input name="phone" maxlength="80"/></label><div class="cc-wide"><button class="btn btn-primary" type="submit">${ccText('Create account', '创建账号')}</button></div></form></section>` : ''}
     <div class="card" style="padding:11px 16px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--muted);">
       <span>${escapeHtml(summary)}</span>
       <span style="flex:1;"></span>

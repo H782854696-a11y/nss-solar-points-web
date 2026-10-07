@@ -245,6 +245,16 @@
     'role.sales': ['Sales', '销售人员'],
     'role.warehouse': ['Warehouse', '仓库人员'],
     'role.service': ['Service', '售后/技术'],
+  'role.purchaser': ['Purchasing', '采购员'],
+  // 采购跟单工作区（2026-10-07 新增）
+  'nav.workspacePurchasing': ['Purchasing', '采购跟单'],
+  'purchase.stage.ordered': ['Order placed', '已下单'],
+  'purchase.stage.preparing': ['Preparing / QC', '备货验货'],
+  'purchase.stage.loaded': ['Loaded on vessel', '已开船'],
+  'purchase.stage.inTransit': ['In transit at sea', '海运在途'],
+  'purchase.stage.arrived': ['Arrived at port', '已到港'],
+  'purchase.stage.customs': ['Clearing customs', '清关中'],
+  'purchase.stage.warehoused': ['Warehoused', '已入库'],
     'header.searchPh': ['Search stores, tasks and workflows', '搜索门店 / 任务 / 流程'],
     'header.logout': ['Sign out', '退出登录'],
 
