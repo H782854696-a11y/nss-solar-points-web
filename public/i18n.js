@@ -70,7 +70,7 @@
     'nav.stores': ['Stores', '门店管理'],
     'nav.mall': ['Points Mall', '积分商城'],
     'nav.approvals': ['Approvals', '积分审核'],
-    'nav.controlCenter': ['Group Control Center', '集团中控'],
+    'nav.controlCenter': ['Control Platform', '中控平台'],
     'nav.sheets': ['Cloud Sync', '云同步'],
     'nav.db': ['Data Store', '数据主库'],
     'nav.reports': ['Reports', '经营报表'],
@@ -207,7 +207,7 @@
     'role.sales': ['Sales', '销售人员'],
     'role.warehouse': ['Warehouse', '仓库人员'],
     'role.service': ['Service', '售后/技术'],
-    'header.searchPh': ['Search name / phone', '搜索姓名 / 手机号'],
+    'header.searchPh': ['Search stores, tasks and workflows', '搜索门店 / 任务 / 流程'],
     'header.logout': ['Sign out', '退出登录'],
 
     /* ==================== 经营报表 ==================== */

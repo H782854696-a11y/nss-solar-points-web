@@ -300,11 +300,11 @@ const SCREEN_PERMS = {
 
 // 经营总览与经营报表不再作为独立板块开放；底层实现和数据保留以便回滚。
 const RETIRED_OPERATION_SCREENS = new Set(['dashboard', 'reports', 'storeBiz', 'memberBiz']);
-const HOME_SCREEN_ORDER = ['controlCenter', 'stores', 'members', 'rules', 'mall', 'approvals', 'sheets', 'db', 'audit', 'accounts', 'account'];
+const HOME_SCREEN_ORDER = ['controlCenter', 'stores', 'db', 'audit', 'accounts', 'account'];
 
 /** 当前账号能否访问某个页面 */
 function canAccessScreen(name) {
-  if (RETIRED_OPERATION_SCREENS.has(name)) return false;
+  if (RETIRED_OPERATION_SCREENS.has(name) || ['members','rules','mall','approvals','sheets'].includes(name)) return false;
   if (name === 'controlCenter') return ['workflow.view', 'workflow.create', 'workflow.approve', 'workflow.execute', 'task.view', 'task.create', 'org.view'].some(can);
   const perm = SCREEN_PERMS[name];
   if (!perm) return true;
@@ -320,9 +320,10 @@ async function initApp() {
   // 侧栏入口按角色显隐。用 display 而不是 remove()：
   // remove() 是永久移除，店长登录过一次之后管理员再登录，入口就再也回不来了。
   $$('.nav-item').forEach(el => {
-    el.style.display = canAccessScreen(el.dataset.screen) ? '' : 'none';
+    const workspacePerms = { approvals: ['workflow.view', 'workflow.create'], collaboration: ['task.view', 'task.create'], storeops: ['task.create', 'store.view', 'alert.view'], governance: ['org.view', 'staff.view', 'workflow.configure', 'system.audit.view'] };
+    const needed = workspacePerms[el.dataset.workspace];
+    el.style.display = canAccessScreen(el.dataset.screen) && (!needed || needed.some(can)) ? '' : 'none';
   });
-  $('#legacyNavGroup').open = false;
   // 门店列表接口需要 store.view。没有该权限就跳过请求 ——
   // 否则 403 会抛出异常、打断整个 initApp，页面停在半渲染状态。
   // （例如 sales 角色：门店信息对它是不可见的，跳过即可，不影响其它功能。）
@@ -332,8 +333,7 @@ async function initApp() {
     state.stores = [];
   }
   // 云同步状态接口需要 sync.view。没有该权限就不要请求它（否则 403 会打断整个初始化）
-  if (can('sync.view')) await refreshSheets();
-  else hideSyncChip();
+  hideSyncChip();
   // 侧栏与抽屉的事件只绑一次。重复绑定会让汉堡按钮「开了又立刻关」，
   // 点一次导航也会发出两次请求。
   if (!appBound) {
@@ -346,7 +346,7 @@ async function initApp() {
 
 function bindSidebar() {
   $$('.nav-item').forEach(el => {
-    el.addEventListener('click', () => { setScreen(el.dataset.screen); closeNav(); });
+    el.addEventListener('click', () => { if (el.dataset.workspace) state.ccWorkspace = el.dataset.workspace; else if (el.dataset.screen === 'controlCenter') state.ccWorkspace = 'overview'; setScreen(el.dataset.screen); closeNav(); });
   });
 }
 
@@ -389,8 +389,6 @@ function setScreen(name) {
   $$('.nav-item').forEach(el => {
     el.classList.toggle('active', el.dataset.screen === name);
   });
-  const legacyGroup = $('#legacyNavGroup');
-  if (legacyGroup?.querySelector(`.nav-item[data-screen="${name}"]`)) legacyGroup.open = true;
   updateHeaderCrumb();
   updateSyncChip();
   renderScreen();
@@ -583,7 +581,7 @@ async function renderControlCenter(root) {
   if (state.ccAuditFilters?.from) auditQuery.set('from', state.ccAuditFilters.from);
   if (state.ccAuditFilters?.to) auditQuery.set('to', state.ccAuditFilters.to);
   const storeOperationQuery = new URLSearchParams({ limit: '10', reportsOffset: String(state.storeOperationOffsets?.reports || 0), inspectionsOffset: String(state.storeOperationOffsets?.inspections || 0), issuesOffset: String(state.storeOperationOffsets?.issues || 0) });
-  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, auditData, operationData, accountData] = await Promise.all([
+  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, auditData, operationData, accountData, announcementData] = await Promise.all([
     mayViewWorkflows ? GET(`/api/v2/workflows?${workflowQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
     can('workflow.configure') ? GET('/api/v2/workflows/definitions') : Promise.resolve({ items: [] }),
     mayViewTasks ? GET(`/api/v2/tasks?${taskQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
@@ -595,6 +593,7 @@ async function renderControlCenter(root) {
     can('system.audit.view') ? GET(`/api/v2/audit-events?${auditQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25 }),
     can('store.view') ? GET(`/api/v2/store-operations?${storeOperationQuery.toString()}`) : Promise.resolve({ reports: [], inspections: [], issues: [], pages: {} }),
     can('workflow.configure') && can('system.user.view') ? GET('/api/users').catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
+    GET('/api/v2/announcements?includeDrafts=1'),
   ]);
   if (mayViewWorkflows) state.workflowOffset = Number(workflowData.offset || 0);
   if (mayViewTasks) state.taskOffset = Number(taskData.offset || 0);
@@ -605,6 +604,8 @@ async function renderControlCenter(root) {
   const tasks = taskData.items || [], orgs = orgData.items || [];
   const definitions = definitionData.items || [];
   const employees = employeeData.items || [], notices = noticeData.items || [], stores = storeData.items || [];
+  const announcements = announcementData.items || [];
+  const leadAnnouncement = announcements.find(x => x.status === 'published');
   const approverAccounts = (accountData.items || []).filter(x => !x.disabled);
   const remediationCounts = workflowData.countsByType?.store_remediation || {};
   const openRemediationCount = ['pending_approval','returned','approved','execution_pending','awaiting_review'].reduce((sum, status) => sum + Number(remediationCounts[status] || 0), 0);
@@ -692,15 +693,26 @@ async function renderControlCenter(root) {
   }).join('');
   const initialProcessType = Object.keys(ACTIVE_CONTROL_TYPES)[0];
   root.innerHTML = `
-    <div class="page-header"><div class="page-header-text"><div class="page-title">${ccText('Group Control Center', '集团中控')}</div><div class="page-subtitle">${ccText('Approvals, tasks, store follow-up and audit', '审批流程、任务协作、门店整改与审计监督')}</div></div></div>
+    <div class="page-header"><div class="page-header-text"><div class="page-title">${ccText('Control Platform', '中控平台')}</div><div class="page-subtitle">${ccText('Approvals, tasks, store follow-up and announcements', '审批流程、任务协作、门店跟进与内容公告')}</div></div></div>
     <section class="cc-overview"><div class="cc-overview-grid">
       <button type="button" class="card cc-overview-card" data-cc-jump="approvals" data-cc-actionable-jump><span>${ccText('My pending approvals', '待我审批')}</span><strong>${Number(workflowData.pendingForMe || 0)}</strong></button>
       <button type="button" class="card cc-overview-card" data-cc-jump="collaboration"><span>${ccText('Open tasks', '未完成任务')}</span><strong>${Number(taskData.counts?.open || 0) + Number(taskData.counts?.in_progress || 0)}</strong></button>
       <button type="button" class="card cc-overview-card" data-cc-jump="approvals"><span>${ccText('Open store remediation', '未完成门店整改')}</span><strong>${openRemediationCount}</strong></button>
       <button type="button" class="card cc-overview-card" data-cc-jump="collaboration"><span>${ccText('Unread notifications', '未读通知')}</span><strong>${Number(noticeData.unread || 0)}</strong></button>
-    </div><nav class="cc-workspace-tabs" aria-label="${ccText('Group Control Center sections','集团中控工作区')}">
-      ${[['overview','Overview','总览'],['approvals','Approvals','审批中心'],['collaboration','Tasks & notices','任务与通知'],['storeops','Store follow-up','门店运营跟进'],['governance','Audit & settings','审计与设置']].map(([key,en,zh]) => `<button type="button" data-cc-tab="${key}" class="cc-workspace-tab">${ccText(en,zh)}</button>`).join('')}
-    </nav></section>
+    </div>
+    <div class="cc-announcement-ticker"><span aria-hidden="true">📢</span><span class="cc-ticker-track"><span class="cc-ticker-content">${leadAnnouncement ? escapeHtml(leadAnnouncement.title) : ccText('No important announcement yet', '暂无重要公告')}</span></span><button type="button" data-cc-jump="announcements">${ccText('View all', '查看全部')} →</button></div>
+    <div class="cc-dashboard-grid">
+      <section class="card cc-dashboard-panel"><h3>${ccText('Quick actions', '快捷办理')}</h3><div class="cc-quick-actions">
+        ${can('workflow.create') ? `<button type="button" data-cc-quick="stocktake">${ccText('Start stocktake request', '发起盘点申请')}</button><button type="button" data-cc-quick="store_remediation">${ccText('Submit store remediation', '提交门店整改')}</button>` : ''}
+        ${can('task.create') ? `<button type="button" data-cc-quick="task">${ccText('Create collaboration task', '创建协作任务')}</button>` : ''}
+        ${can('announcement.manage') ? `<button type="button" data-cc-quick="announcement">${ccText('Publish announcement', '发布内容公告')}</button>` : ''}
+      </div></section>
+      <section class="card cc-dashboard-panel"><h3>${ccText('Recent matters', '最近事项')}</h3><div class="cc-dashboard-list">${[...workflows.slice(0,3).map(w => ({ title: w.title, status: ccStatus(w.status), area: 'approvals' })), ...tasks.slice(0,2).map(t => ({ title: t.title, status: ccStatus(t.status), area: 'collaboration' }))].slice(0,4).map(x => `<button type="button" data-cc-jump="${x.area}"><span>${escapeHtml(x.title)}</span><small>${escapeHtml(x.status)}</small></button>`).join('') || `<span class="cc-muted">${ccText('No recent matters', '暂无最近事项')}</span>`}</div></section>
+      <section class="card cc-dashboard-panel"><h3>${ccText('Reminders', '待办提醒')}</h3><div class="cc-dashboard-list"><button type="button" data-cc-jump="collaboration"><span>${ccText('Unread notifications', '未读通知')}</span><strong>${Number(noticeData.unread || 0)}</strong></button><button type="button" data-cc-jump="approvals"><span>${ccText('Pending approvals', '待我审批')}</span><strong>${Number(workflowData.pendingForMe || 0)}</strong></button></div></section>
+    </div><div class="cc-detail-heading" hidden><button type="button" class="btn btn-sm" data-cc-tab="overview">← ${ccText('Back to overview', '返回概览')}</button><strong id="ccDetailTitle"></strong></div></section>
+    <section class="cc-section" data-cc-area="announcements"><h3>${ccText('Announcements', '内容公告')}</h3>
+      ${can('announcement.manage') ? `<form id="ccAnnouncementForm" class="card cc-announcement-form"><label class="cc-field"><span>${ccText('Title', '标题')}</span><input name="title" maxlength="180" required/></label><label class="cc-field"><span>${ccText('Content', '内容')}</span><textarea name="body" maxlength="5000" rows="4" required></textarea></label><div class="cc-inline-form"><label><input type="checkbox" name="pinned"/> ${ccText('Pin to ticker', '置顶到公告条')}</label><select name="status"><option value="published">${ccText('Publish now', '立即发布')}</option><option value="draft">${ccText('Save draft', '保存草稿')}</option></select><button class="btn btn-primary">${ccText('Save announcement', '保存公告')}</button></div></form>` : ''}
+      <div class="cc-list">${announcements.filter(x => x.status !== 'archived').map(x => `<article class="card cc-announcement-item"><div class="cc-card-top"><strong>${x.pinned ? '📢 ' : ''}${escapeHtml(x.title)}</strong><span class="cc-status">${x.status === 'draft' ? ccText('Draft', '草稿') : ccText('Published', '已发布')}</span></div><p>${escapeHtml(x.body).replace(/\n/g, '<br>')}</p><div class="cc-meta">${escapeHtml(x.createdByName || '')} · ${escapeHtml(new Date(x.updatedAt).toLocaleString())}</div>${can('announcement.manage') ? `<button type="button" class="btn btn-sm" data-cc-announcement-edit="${escapeHtml(x.id)}">${ccText('Edit', '编辑')}</button>` : ''}</article>`).join('') || `<div class="card cc-empty">${ccText('No announcements', '暂无公告')}</div>`}</div></section>
     ${can('workflow.create') ? `<section class="card cc-section" data-cc-area="approvals"><h3>${ccText('New request', '新建申请')}</h3><form id="ccWorkflowForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Process type', '流程类型')}</span><select name="type">${Object.entries(ACTIVE_CONTROL_TYPES).map(([k,v]) => `<option value="${k}">${escapeHtml(v[String(locale()).toLowerCase().startsWith('zh') ? 1 : 0])}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Title', '标题')}</span><input name="title" required maxlength="180"/></label><div id="ccWorkflowFields" class="cc-form-grid cc-wide">${renderWorkflowFields(initialProcessType)}</div><div id="ccStocktakePanel" data-stocktake-editor="new" class="cc-wide" hidden></div></div><button class="btn btn-primary" type="submit">${ccText('Submit for approval', '提交审批')}</button></form></section>` : ''}
     ${can('task.create') ? `<section class="card cc-section" data-cc-area="collaboration"><h3>${ccText('Create task', '创建任务')}</h3><form id="ccTaskForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Task title', '任务名称')}</span><input name="title" required maxlength="180"/></label><label class="cc-field"><span>${ccText('Assignee', '负责人')}</span><select name="assigneeId"><option value="">${ccText('Unassigned', '暂不指派')}</option>${assignees.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}${a.username ? ` · ${escapeHtml(a.username)}` : ''}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">—</option>${stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Due date', '截止日期')}</span><input name="dueAt" type="date"/></label><label class="cc-field"><span>${ccText('Priority', '优先级')}</span><select name="priority"><option value="normal">${ccText('Normal', '普通')}</option><option value="high">${ccText('High', '高')}</option><option value="urgent">${ccText('Urgent', '紧急')}</option><option value="low">${ccText('Low', '低')}</option></select></label><label class="cc-field cc-wide"><span>${ccText('Description', '任务说明')}</span><textarea name="description" rows="2"></textarea></label><label class="cc-field cc-wide"><span>${ccText('Checklist (one item per line)', '执行清单（每行一项）')}</span><textarea name="checklist" rows="4" maxlength="12000" placeholder="${ccText('Prepare materials\nConfirm completion\nUpload evidence', '准备资料\n确认完成情况\n上传凭证')}"></textarea></label></div><button class="btn btn-primary" type="submit">${ccText('Create task', '创建任务')}</button></form></section>` : ''}
     ${mayViewOrg ? `<section class="card cc-section" data-cc-area="governance"><h3>${ccText('Organization', '组织架构')}</h3><p>${ccText('China management center · Philippines management center', '中国管理中心 · 菲律宾管理中心')}</p>${orgs.length ? orgs.map(o => `<span class="cc-chip">${escapeHtml(o.code)} · ${escapeHtml(o.name)}</span>`).join('') : `<span class="cc-muted">${ccText('No organization records configured yet', '尚未配置组织档案')}</span>`}${can('org.manage') ? `<form id="ccOrgForm" class="cc-inline-form"><input name="code" required placeholder="CN-HQ"/><input name="name" required placeholder="${ccText('Organization name', '组织名称')}"/><select name="countryCode"><option value="CN">CN</option><option value="PH" selected>PH</option></select><button class="btn btn-sm btn-primary">${ccText('Add', '添加')}</button></form>` : ''}</section>` : ''}
@@ -718,9 +730,17 @@ async function renderControlCenter(root) {
   root.querySelectorAll('[data-cc-tab]').forEach(button => { if (button.dataset.ccTab !== 'overview') button.hidden = !availableAreas.has(button.dataset.ccTab); });
   root.querySelectorAll('[data-cc-jump]').forEach(button => { button.hidden = !availableAreas.has(button.dataset.ccJump); });
   const setWorkspace = key => {
-    const requested = ['overview','approvals','collaboration','storeops','governance'].includes(key) ? key : 'overview';
+    const requested = ['overview','approvals','collaboration','storeops','governance','announcements'].includes(key) ? key : 'overview';
     const active = requested !== 'overview' && !availableAreas.has(requested) ? 'overview' : requested;
     root.querySelectorAll('[data-cc-area]').forEach(section => { section.hidden = active === 'overview' || section.dataset.ccArea !== active; });
+    root.querySelector('.cc-dashboard-grid').hidden = active !== 'overview';
+    root.querySelector('.cc-overview-grid').hidden = active !== 'overview';
+    root.querySelector('.cc-announcement-ticker').hidden = active !== 'overview';
+    root.querySelector('.cc-detail-heading').hidden = active === 'overview';
+    const titles = { approvals: ccText('Approval Center','审批中心'), collaboration: ccText('Tasks & notifications','任务协作'), storeops: ccText('Store follow-up','门店跟进'), governance: ccText('Governance','治理设置'), announcements: ccText('Announcements','内容公告') };
+    root.querySelector('#ccDetailTitle').textContent = titles[active] || '';
+    $$('.nav-item[data-workspace]').forEach(el => el.classList.toggle('active', state.screen === 'controlCenter' && el.dataset.workspace === active));
+    $('.nav-item-primary')?.classList.toggle('active', active === 'overview');
     root.querySelectorAll('[data-cc-tab]').forEach(button => { const selected = button.dataset.ccTab === active; button.classList.toggle('active', selected); button.setAttribute('aria-current', selected ? 'page' : 'false'); });
     state.ccWorkspace = active;
   };
@@ -735,6 +755,14 @@ async function renderControlCenter(root) {
     }
     setWorkspace(button.dataset.ccJump);
   }));
+  root.querySelectorAll('[data-cc-quick]').forEach(button => button.addEventListener('click', () => {
+    const kind = button.dataset.ccQuick; setWorkspace(kind === 'task' ? 'collaboration' : kind === 'announcement' ? 'announcements' : 'approvals');
+    if (kind === 'task') $('#ccTaskForm input[name=title]', root)?.focus();
+    else if (kind === 'announcement') $('#ccAnnouncementForm input[name=title]', root)?.focus();
+    else { const select = $('#ccWorkflowForm select[name=type]', root); if (select) { select.value = kind; select.dispatchEvent(new Event('change')); $('#ccWorkflowForm input[name=title]', root)?.focus(); } }
+  }));
+  $('#ccAnnouncementForm', root)?.addEventListener('submit', async event => { event.preventDefault(); const form = event.currentTarget; const data = new FormData(form); try { await POST('/api/v2/announcements', { title: data.get('title'), body: data.get('body'), pinned: data.has('pinned'), status: data.get('status') }); toast(ccText('Announcement saved', '公告已保存'), 'success'); await renderControlCenter(root); } catch (error) { toast(error.message, 'error'); } });
+  $$('[data-cc-announcement-edit]', root).forEach(button => button.addEventListener('click', () => { const item = announcements.find(x => x.id === button.dataset.ccAnnouncementEdit); if (!item) return; const modal = openModal({ title: ccText('Edit announcement','编辑公告'), body: `<form id="ccAnnouncementEdit" class="cc-form-grid"><label class="cc-field"><span>${ccText('Title','标题')}</span><input name="title" required maxlength="180" value="${escapeHtml(item.title)}"/></label><label class="cc-field"><span>${ccText('Content','内容')}</span><textarea name="body" required maxlength="5000" rows="5">${escapeHtml(item.body)}</textarea></label><label><input name="pinned" type="checkbox" ${item.pinned ? 'checked' : ''}/> ${ccText('Pin to ticker','置顶到公告条')}</label><select name="status"><option value="published" ${item.status === 'published' ? 'selected' : ''}>${ccText('Published','已发布')}</option><option value="draft" ${item.status === 'draft' ? 'selected' : ''}>${ccText('Draft','草稿')}</option><option value="archived">${ccText('Archive','归档')}</option></select></form>`, footer: `<button class="btn" data-close>${ccText('Cancel','取消')}</button><button class="btn btn-primary" id="ccAnnouncementUpdate">${ccText('Save','保存')}</button>` }); $('#ccAnnouncementUpdate', modal).addEventListener('click', async () => { const form = $('#ccAnnouncementEdit', modal); if (!form.reportValidity()) return; const data = new FormData(form); try { await PUT(`/api/v2/announcements/${encodeURIComponent(item.id)}`, { title: data.get('title'), body: data.get('body'), pinned: data.has('pinned'), status: data.get('status') }); closeModal(); await renderControlCenter(root); } catch(error) { toast(error.message, 'error'); } }); }));
   setWorkspace(state.ccWorkspace || 'overview');
 
   $('#ccTaskFilterForm')?.addEventListener('submit', async e => {

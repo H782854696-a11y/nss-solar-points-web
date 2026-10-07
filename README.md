@@ -1,6 +1,6 @@
-# NSS Solar 集团中控平台 V2
+# NSS Solar 中控平台 V2
 
-本项目是 NSS Solar 现有 SolarPoints 会员积分系统的隔离源码副本及集团中控 V2 开发版本。集团中控负责远程审批、任务协作、门店跟进、通知和审计；金蝶云星辰继续作为正式财务、销售、商品和进销存系统。
+本项目由 NSS Solar 原 SolarPoints 源码改造为独立中控平台。集团中控负责远程审批、任务协作、门店跟进、通知和审计；金蝶云星辰继续作为正式财务、销售、商品和进销存系统。
 
 ## 当前范围与状态
 
@@ -9,7 +9,8 @@
 - 盘点申请可直接附上任意排版的 Excel（XLSX、XLS、XLSM、XLSB）或 CSV 原文件供审批人下载；不检查表头、工作表或盘点行。单文件最大 10MB，手工明细可选；系统仍会核对文件类型和大小。
 - 不维护中控专用的门店/店长或仓库/负责人主档，不重复实现金蝶已有的财务、销售、商品和库存账。
 - 不接入金蝶 API。需要时，工作人员手工登记外部单据编号和执行状态。
-- 原会员积分功能保持独立；V2 已发布，未重置或迁移旧会员积分数据。
+- 2026-10-07 版本下线旧版会员积分：入口、公开查询及积分 API 均不可访问；积分专属数据在发布后按 `deploy/purge-legacy-points.js` 清理。门店和账号属于中控共用资料，继续保留。
+- 首页采用紧凑仪表盘：待办数字、单行公告、快捷办理、最近事项与待办提醒。公告支持草稿、发布、置顶和归档；发布/编辑权限授予总部管理员、集团负责人、总部运营和菲律宾管理负责人。
 - 当前实现和产品边界见 [README-V2.md](README-V2.md)、[ARCHITECTURE-V2.md](ARCHITECTURE-V2.md) 与 [IMPLEMENTATION-STATUS.md](IMPLEMENTATION-STATUS.md)。完整状态、验证记录和交接步骤见 [HANDOFF.md](HANDOFF.md)。
 
 ## 架构与技术栈
@@ -18,7 +19,7 @@
 - `server.js` 提供登录、权限、审批、任务、通知、门店跟进和审计 API。
 - `lib/` 按审批、权限、存储、报表、审计和提醒等职责拆分业务逻辑。数据可使用 JSON 存储或 Node 内置 `node:sqlite` SQLite 驱动。
 - `public/` 包含管理界面、样式、双语资源和 PWA manifest/service worker。PWA 可缓存页面外壳，离线时可匹配带版本参数的静态资源；只清理本应用旧缓存，不删除同域其他应用缓存。业务 API 仍需联网。
-- `deploy/` 保存 V2 独立目录发布、备份、只读预检和 PM2 配置辅助脚本。2026-10-05 已用这些脚本发布到服务器，详细结果见 [HANDOFF.md](HANDOFF.md)。
+- `deploy/` 保存 V2 独立目录发布、备份、只读预检、积分专属数据清理和 PM2 配置辅助脚本。2026-10-05 已用这些脚本发布到服务器，详细结果见 [HANDOFF.md](HANDOFF.md)。
 - 主要运行依赖列于 `package.json` 与 `package-lock.json`：Express、cookie-parser、bcryptjs、nanoid。
 
 ## 前置环境与安装
@@ -63,9 +64,9 @@ npm test
 
 ## 部署说明
 
-生产域名为 `nss-solar-points.com`。既有部署记录指向 `/opt/solarpoints-v2/`（PM2 名称 `solarpoints-v2`，本机端口 3001），原会员积分应用使用独立的 `/opt/solarpoints/` 路径。以上是历史交接信息，本地源码不能证明当前生产状态。
+生产域名为 `nss-solar-points.com`。既有部署记录指向 `/opt/solarpoints-v2/`（PM2 名称 `solarpoints-v2`，本机端口 3001），原会员积分应用使用独立的 `/opt/solarpoints/` 路径，已停止；本次发布后将清理该旧应用。以上是历史交接信息，本地源码不能证明当前生产状态。
 
-先用 `deploy/preflight-v2.sh nss-solar-v2` 只读核对服务器目录、数据、磁盘和进程。`deploy/deploy-v2.sh` 面向已存在的 V2 目录和数据目录，要求显式提供 SSH 目标，只从已提交的 Git 版本制作发布包，并在切换前备份和校验备份。2026-10-05 已完成一次失败自动回退和一次成功发布，当前公网前端版本 `v59`，PM2 从 `/opt/solarpoints-v2/current/server.js` 运行。发布脚本不能用于首次初始化，也不操作 `/opt/solarpoints/`。备份文件完整性已核对；仍需定期演练从备份恢复。此次未修改 DNS 或证书。
+先用 `deploy/preflight-v2.sh nss-solar-v2` 只读核对服务器目录、数据、磁盘和进程。`deploy/deploy-v2.sh` 面向已存在的 V2 目录和数据目录，要求显式提供 SSH 目标，只从已提交的 Git 版本制作发布包，并在切换前备份和校验备份。2026-10-05 已完成一次失败自动回退和一次成功发布，上一版公网前端版本 `v59`，PM2 从 `/opt/solarpoints-v2/current/server.js` 运行。发布脚本不能用于首次初始化，也不操作 `/opt/solarpoints/`。积分数据清理另行执行，须先完成发布与备份。备份文件完整性已核对；仍需定期演练从备份恢复。此次未修改 DNS 或证书。
 
 ## 常见问题
 
@@ -74,4 +75,4 @@ npm test
 - **误把资料写进项目目录**：为 `SP_DATA_DIR` 设置明确的本地隔离路径；不要使用生产路径。`.local-data/` 已加入忽略规则。
 - **`.env` 修改后配置没有生效**：本项目不自动加载 `.env`；按上面的 shell 命令加载后再启动。
 - **手机离线时流程无法提交**：PWA 只缓存页面外壳，审批、通知和附件 API 需要网络连接。
-- **浏览器仍显示旧页面**：强制刷新页面并重新登录；若 PWA 仍缓存旧版，关闭后重新打开。服务器已核对 `app.js?v=58`；若依旧显示旧版，再检查浏览器缓存和 service worker。
+- **浏览器仍显示旧页面**：强制刷新页面并重新登录；若 PWA 仍缓存旧版，关闭后重新打开。新版 `app.js?v=60`；若依旧显示旧版，再检查浏览器缓存和 service worker。

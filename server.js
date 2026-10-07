@@ -15,12 +15,12 @@ const store = require('./lib/store');
 const { readCollection, writeCollection } = store;
 const rbac = require('./lib/rbac');
 const guard = require('./lib/rbac-guard');
-const sheetsSync = require('./lib/sheets-sync');
+const sheetsSync = require('./lib/sheets-sync'); // retired routes remain inert until removed
 const points = require('./lib/points');
 const { recordTransaction, grantPoints, deductPoints, refundPoints } = require('./lib/ledger');
 const approvals = require('./lib/approvals'); // 积分审核（2026-09-19）
 const mall = require('./lib/mall');           // 积分商城（2026-09-19）
-const pointsExpiry = require('./lib/points-expiry');
+const pointsExpiry = require('./lib/points-expiry'); // retired routes remain inert
 const controlReminders = require('./lib/control-reminders');
 const reports = require('./lib/reports');
 const lookup = require('./lib/lookup');
@@ -116,6 +116,11 @@ app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
 
 // 静态资源
+const RETIRED_POINTS_PATH = /^\/(?:check(?:\.[^/]*)?|api\/(?:members|pending|products|redemptions|rules|sheets|dashboard|transactions|reports|mall|public\/points-lookup)(?:\/|$))/i;
+app.use((req, res, next) => {
+  if (RETIRED_POINTS_PATH.test(req.path)) return res.status(410).json({ error: '旧版积分系统已下线' });
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 
 // 启动时种子
@@ -1014,7 +1019,7 @@ app.post('/api/stores', (req, res) => {
   res.json({ ok: true, store: s });
 });
 
-// 删除门店：有名下会员时拒绝（避免把会员变成孤儿），绑定的店长一并停用
+// 删除门店：有管理流程或任务时拒绝，绑定的店长一并停用。
 app.delete('/api/stores/:id', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   // RBAC：store.delete
@@ -1025,14 +1030,9 @@ app.delete('/api/stores/:id', (req, res) => {
   const target = stores[idx];
   // RBAC：数据范围（不能删除管辖范围之外的门店）
   if (!guard.check(req, res, 'store.delete', { ...target, storeId: target.id })) return;
-  const members = readAll('members') || [];
-  const owned = members.filter(m => m.storeId === target.id).length;
-  if (owned > 0) {
-    return res.status(400).json({
-      error: `该门店名下还有 ${owned} 位会员，请先用「编辑会员」把他们转到其他门店，再删除`,
-      memberCount: owned,
-    });
-  }
+  const linked = ['workflowInstances', 'tasks', 'storeReports', 'storeInspections', 'storeIssues']
+    .some(collection => (readAll(collection) || []).some(item => item.storeId === target.id));
+  if (linked) return res.status(409).json({ error: '该门店仍有关联的审批、任务或运营记录，不能删除' });
   let disabledManager = null;
   if (target.managerId) {
     const users = readAll('users') || [];
@@ -1066,7 +1066,6 @@ app.put('/api/stores/:id', (req, res) => {
     if (!guard.check(req, res, 'store.edit', { ...s, storeId: s.id, regionId: nextRegionId, country: 'PH' })) return;
     s.regionId = nextRegionId;
   }
-  const prevName = s.name;
   if (b.name) {
     const nextName = String(b.name).trim();
     if (!nextName) return res.status(400).json({ error: '门店名称不能为空' });
@@ -1093,17 +1092,8 @@ app.put('/api/stores/:id', (req, res) => {
   }
   stores[idx] = s;
   writeAll('stores', stores);
-  // 会员记录里冗余存了一份 storeName，门店改名后必须级联更新，否则名单/报表会显示旧店名
-  let cascaded = 0;
-  if (s.name !== prevName) {
-    const members = readAll('members');
-    members.forEach(m => {
-      if (m.storeId === s.id && m.storeName !== s.name) { m.storeName = s.name; cascaded++; }
-    });
-    if (cascaded) writeAll('members', members);
-  }
-  auditLog(`update store: ${s.name} by ${u.username}${cascaded ? ` (同步 ${cascaded} 位会员的店名)` : ''}`);
-  res.json({ ok: true, store: s, cascadedMembers: cascaded });
+  auditLog(`update store: ${s.name} by ${u.username}`);
+  res.json({ ok: true, store: s });
 });
 
 // 添加店长（创建店长账号并绑定门店）
@@ -1653,12 +1643,11 @@ app.post('/api/sheets/log', (req, res) => {
 // 让管理员在浏览器里直接查看服务器主库的原始记录，只读、不改动生产数据。
 
 const DB_COLLECTIONS = [
-  { key: 'members',      label: '会员',        kind: 'array',  desc: '零售 + B2B 会员档案' },
   { key: 'stores',       label: '门店',        kind: 'array',  desc: '门店档案与店长绑定' },
-  { key: 'transactions', label: '积分流水',    kind: 'array',  desc: '积分发放 / 核销记录' },
-  { key: 'rules',        label: '积分规则',    kind: 'object', desc: '规则、等级、B2B 阶梯（单条）' },
   { key: 'users',        label: '账号',        kind: 'array',  desc: '登录账号（密码已打码）', sensitive: ['password'] },
-  { key: 'sheets',       label: '同步配置',    kind: 'object', desc: 'Google Sheets 同步状态', sensitive: ['syncedSignature', 'secret'] },
+  { key: 'workflowInstances', label: '审批流程', kind: 'array', desc: '管理流程实例' },
+  { key: 'tasks',        label: '协作任务',    kind: 'array', desc: '任务与执行记录' },
+  { key: 'announcements', label: '内容公告', kind: 'array', desc: '中控公告' },
   { key: 'audit',        label: '操作审计日志', kind: 'lines',  desc: '服务器操作日志（倒序）' },
 ];
 
@@ -2948,6 +2937,40 @@ app.put('/api/v2/tasks/:id', (req, res) => {
   item.updatedAt = nowIso(); writeAll('tasks', items); recordControlAudit(req, u, 'task.update', 'task', item.id);
   res.json({ item });
 });
+app.get('/api/v2/announcements', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const canManage = rbac.hasPermission(u, 'announcement.manage');
+  const items = (readAll('announcements') || [])
+    .filter(x => x.status === 'published' || (canManage && req.query.includeDrafts === '1' && x.status === 'draft'))
+    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
+  res.json({ items, canManage });
+});
+app.post('/api/v2/announcements', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'announcement.manage')) return;
+  const title = controlCenter.cleanText(req.body?.title, 180);
+  const body = controlCenter.cleanText(req.body?.body, 5000);
+  const status = req.body?.status === 'draft' ? 'draft' : 'published';
+  if (!title || !body) return res.status(400).json({ error: '请填写公告标题和内容' });
+  const item = { id: nanoid(), title, body, status, pinned: !!req.body?.pinned,
+    createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso() };
+  const items = readAll('announcements') || []; items.unshift(item); writeAll('announcements', items);
+  recordControlAudit(req, u, 'announcement.create', 'announcement', item.id, { status, pinned: item.pinned });
+  res.status(201).json({ item });
+});
+app.put('/api/v2/announcements/:id', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'announcement.manage')) return;
+  const items = readAll('announcements') || [], item = items.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '公告不存在' });
+  const title = controlCenter.cleanText(req.body?.title, 180);
+  const body = controlCenter.cleanText(req.body?.body, 5000);
+  if (!title || !body || !['draft', 'published', 'archived'].includes(req.body?.status)) return res.status(400).json({ error: '公告内容或状态无效' });
+  Object.assign(item, { title, body, status: req.body.status, pinned: !!req.body.pinned, updatedAt: nowIso() });
+  writeAll('announcements', items);
+  recordControlAudit(req, u, 'announcement.update', 'announcement', item.id, { status: item.status, pinned: item.pinned });
+  res.json({ item });
+});
 app.get('/api/v2/notifications', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const all = (readAll('notifications') || []).filter(x => x.userId === u.id);
@@ -3061,13 +3084,9 @@ app.use((err, req, res, next) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`SolarPoints app running on http://localhost:${PORT}`);
+  console.log(`NSS Solar control platform running on http://localhost:${PORT}`);
   if (process.env.SP_ADMIN_PASSWORD) console.log('New administrator bootstrap is using SP_ADMIN_PASSWORD; first login will require a password change.');
   else console.log(`For a new data directory, read ${path.join(store.DATA_DIR, 'INITIAL_ADMIN_CREDENTIALS.txt')} and remove it after completing the forced password change.`);
-  // 启动 Google Sheets 自动同步引擎
-  sheetsSync.start();
-  // 启动积分到期扫描（每 6 小时）
-  pointsExpiry.start();
   // 启动任务与门店整改逾期提醒（每 15 分钟）
   controlReminders.start();
 });

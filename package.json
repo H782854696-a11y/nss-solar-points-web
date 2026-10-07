@@ -1,7 +1,7 @@
 {
   "name": "solarpoints-app",
   "version": "1.0.0",
-  "description": "NSS Solar 集团中控 V2 与独立旧会员积分模块",
+  "description": "NSS Solar 中控平台 V2：管理流程、任务、门店跟进与公告",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
