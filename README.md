@@ -64,9 +64,11 @@ npm test
 
 ## 部署说明
 
-生产域名为 `nss-solar-points.com`。既有部署记录指向 `/opt/solarpoints-v2/`（PM2 名称 `solarpoints-v2`，本机端口 3001），原会员积分应用使用独立的 `/opt/solarpoints/` 路径，已停止；本次发布后将清理该旧应用。以上是历史交接信息，本地源码不能证明当前生产状态。
+2026-10-07 本轮未重新运行完整旧测试套件；已完成语法检查、隔离登录/公告/旧接口冒烟检查，以及线上首页、健康、旧接口和数据目录核对。
 
-先用 `deploy/preflight-v2.sh nss-solar-v2` 只读核对服务器目录、数据、磁盘和进程。`deploy/deploy-v2.sh` 面向已存在的 V2 目录和数据目录，要求显式提供 SSH 目标，只从已提交的 Git 版本制作发布包，并在切换前备份和校验备份。2026-10-05 已完成一次失败自动回退和一次成功发布，上一版公网前端版本 `v59`，PM2 从 `/opt/solarpoints-v2/current/server.js` 运行。发布脚本不能用于首次初始化，也不操作 `/opt/solarpoints/`。积分数据清理另行执行，须先完成发布与备份。备份文件完整性已核对；仍需定期演练从备份恢复。此次未修改 DNS 或证书。
+生产域名为 `nss-solar-points.com`。当前部署在 `/opt/solarpoints-v2/`（PM2 名称 `solarpoints-v2`，本机端口 3001）。旧积分应用目录 `/opt/solarpoints/` 已清理。
+
+先用 `deploy/preflight-v2.sh nss-solar-v2` 只读核对服务器目录、数据、磁盘和进程。`deploy/deploy-v2.sh` 面向已存在的 V2 目录和数据目录，要求显式提供 SSH 目标，只从已提交的 Git 版本制作发布包，并在切换前备份和校验备份。2026-10-07 已发布 `app.js?v=60`；首页和健康接口为 200，积分 API 与旧公开查询为 410。积分专属 JSON 已由 `deploy/purge-legacy-points.js` 清理，门店、账号及 V2 数据保留。唯一保留的恢复包为 `/opt/solarpoints-v2/backups/nss-solar-v2-clean-20261007T0320Z.tar.gz`，已核对不含旧积分数据。此次未修改 DNS 或证书；真实账号逐页及真实手机 PWA 仍待人工验收。
 
 ## 常见问题
 
