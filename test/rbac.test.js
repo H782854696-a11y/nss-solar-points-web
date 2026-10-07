@@ -22,8 +22,10 @@ const U = {
   svcS1:      { id: 'u10', role: 'service', storeId: 'S1', employeeId: 'E10' },
   legacyMgr:  { id: 'u11', role: 'manager', storeId: 'S1' },   // 旧角色
 };
-const M1 = { id: 'm1', storeId: 'S1', ownerId: null, status: 'active' };
-const M2 = { id: 'm2', storeId: 'S2', ownerId: null, status: 'active' };
+// 2026-10-08 审计 C-1：会员记录带 country 字段（菲律宾会员即 country='PH'）。
+// philippines 范围已改 fail-closed —— 缺 country 的记录对菲方不可见。
+const M1 = { id: 'm1', storeId: 'S1', ownerId: null, status: 'active', country: 'PH' };
+const M2 = { id: 'm2', storeId: 'S2', ownerId: null, status: 'active', country: 'PH' };
 
 // ---- 测试专用探针角色：region 数据范围（沿用本文件既有的探针写法）----
 // 2026-09-22 组织架构调整后，生产矩阵里**已不再有任何角色使用 region 范围**
@@ -170,7 +172,13 @@ ok('全国区域负责人可跨店改会员（M1/M2 都在范围内）',
 ok('全国区域负责人可跨店读会员',
   rbac.can(U.regA, 'member.view', M1) && rbac.can(U.regA, 'member.view', M2));
 ok('全国区域负责人可跨店改门店配置（5 家门店都在范围内）',
-  rbac.can(U.regA, 'store.edit', { id: 's1', name: 'A' }) && rbac.can(U.regA, 'store.edit', { id: 's2', name: 'B' }));
+  rbac.can(U.regA, 'store.edit', { id: 's1', name: 'A', country: 'PH' }) && rbac.can(U.regA, 'store.edit', { id: 's2', name: 'B', country: 'PH' }));
+// 2026-10-08 审计 C-1：philippines 范围 fail-closed —— 缺 country 字段的记录不再默认放行
+ok('philippines 范围：缺 country 的记录拒绝（fail-closed）',
+  !rbac.can(U.regA, 'member.edit', { id: 'mx', storeId: 'S1' }));
+ok('philippines 范围：country=PH 放行', rbac.can(U.regA, 'member.edit', M1));
+ok('philippines 范围：country=CN 拒绝（中菲隔离）',
+  !rbac.can(U.regA, 'member.edit', { id: 'mc', storeId: 'S1', country: 'CN' }));
 // region 分支仍保持 fail-closed（用探针角色验证；该路径已无生产角色使用，但代码仍在）
 ok('region 级：数据没有 regionId 时拒绝（安全一侧）', !rbac.can(U_REGION, 'member.edit', M1));
 ok('region 级：本区域数据放行',
@@ -224,8 +232,8 @@ ok('规则表是表驱动的（无 if/else 链）', typeof rbac.ASSIGNMENT_RULES
 
 // ── 12. L1 / L2 分离 ──
 console.log('\n【12】L1 权限判定与 L2 业务状态判定分离');
-const approvedRec = { id: 'p1', status: 'approved', storeId: 'S1' };
-const pendingRec = { id: 'p2', status: 'pending', storeId: 'S1' };
+const approvedRec = { id: 'p1', status: 'approved', storeId: 'S1', country: 'PH' };
+const pendingRec = { id: 'p2', status: 'pending', storeId: 'S1', country: 'PH' };
 ok('L1：有 approve 权限 → can() 返回 true（不看状态）', rbac.can(U.ph, 'approval.approve', pendingRec));
 ok('L1：即使记录已 approved，can() 仍为 true —— 状态归 L2 管', rbac.can(U.ph, 'approval.approve', approvedRec));
 ok('L1：无 approve 权限 → 无论什么状态都 false', !rbac.can(U.mgrS1, 'approval.approve', pendingRec));

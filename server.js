@@ -10,7 +10,7 @@ const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const { nanoid } = require('nanoid');
 
-const { ensureSeeded, readAll, writeAll } = require('./lib/seed');
+const { ensureSeeded, readAll, writeAll, countryOf, countryIndexes } = require('./lib/seed');
 const store = require('./lib/store');
 const { readCollection, writeCollection } = store;
 const rbac = require('./lib/rbac');
@@ -37,6 +37,13 @@ function makeSession(userId) {
   sessions.set(sid, { userId, expiresAt: Date.now() + SESSION_TTL_MS });
   return sid;
 }
+// 会话过期定时清扫（2026-10-08 审计 M-1）：惰性过期只在被访问时清理，
+// 长期运行会有缓慢内存增长。这里每 10 分钟全量清除已过期 sid。
+// unref 保证不阻止进程退出（测试/单次脚本场景）。
+setInterval(() => {
+  const now = Date.now();
+  for (const [sid, s] of sessions) if (s.expiresAt < now) sessions.delete(sid);
+}, 10 * 60 * 1000).unref();
 function getSessionUser(req) {
   const sid = req.cookies?.[SESSION_COOKIE];
   if (!sid) return null;
@@ -114,6 +121,19 @@ guard.configureRegionResolver(() => {
 // 15mb permits a 10MB stocktake spreadsheet encoded as base64; decoded limits are checked below.
 app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
+
+// ── 安全响应头（2026-10-08 审计 M-3）──
+// 点击劫持、MIME 嗅探、XSS 的纵深防御。附件下载处已单独加 nosniff，这里统一兜底。
+// CSP 说明：前端是原生 SPA + 内联 <style>/事件绑定，故 style-src 需 'unsafe-inline'；
+//          img 允许 data:（头像/凭证预览）；脚本仅自托管（app.js/i18n.js），无 CDN。
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; font-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'");
+  next();
+});
 
 // 静态资源
 const RETIRED_POINTS_PATH = /^\/(?:check(?:\.[^/]*)?|api\/(?:members|pending|products|redemptions|rules|sheets|dashboard|transactions|reports|mall|public\/points-lookup)(?:\/|$))/i;
@@ -1943,7 +1963,10 @@ function controlVisible(req, permission, item) {
   let regionId = item.regionId || null;
   if (!regionId && item.storeId) regionId = (readAll('stores') || []).find(x => x.id === item.storeId)?.regionId || null;
   if (!regionId && item.warehouseId) regionId = (readAll('warehouses') || []).find(x => x.id === item.warehouseId)?.regionId || null;
-  return rbac.can(currentUser, permission, { ...item, regionId, country: item.country || item.countryCode || 'PH' });
+  // 2026-10-08 审计 C-1：country 不再兜底成 'PH'（那会变成 fail-open）。
+  // 写入侧已为业务对象补 country（或 countryCode），这里原样传入；
+  // 缺字段的记录交给 rbac.can 的 fail-closed 判定拒绝，而非默认放行。
+  return rbac.can(currentUser, permission, { ...item, regionId, country: item.country || item.countryCode || null });
 }
 function canExecuteRemediation(req, res, item) {
   const user = getSessionUser(req);
@@ -1964,6 +1987,9 @@ function recordControlAudit(req, user, action, resourceType, resourceId, details
     action, resourceType, resourceId: resourceId || null, result: 'success', details,
     ip: clientIp(req), createdAt: nowIso(),
   });
+  // 2026-10-08 审计 M-4：auditEvents 集合设置保留上限（与 notifications 一致截断），
+  // 避免长期运行无界增长，加剧 JSON 驱动的全量读写成本。
+  if (events.length > 20000) events.length = 20000;
   writeAll('auditEvents', events);
 }
 function normalizeTaskChecklist(raw) {
@@ -2076,7 +2102,12 @@ app.post('/api/v2/users', (req, res) => {
   if (employee?.storeId && store && employee.storeId !== store.id) return res.status(400).json({ error: '员工档案门店与账号绑定门店不一致' });
   if (role === 'regional_manager' && employee?.storeId && region && stores.find(x => x.id === employee.storeId)?.regionId !== region.id) return res.status(400).json({ error: '员工所属门店与账号绑定区域不一致' });
   if (role === 'manager' && store?.managerId) return res.status(409).json({ error: '该门店已有店长账号，请先在门店管理中更换或解绑' });
-  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, storeId: store?.id || null, regionId: role === 'regional_manager' ? region.id : (region?.id || store?.regionId || null), employeeId: employee?.id || null, phone: controlCenter.cleanText(b.phone, 80), createdAt: nowIso(), disabled: false, mustChangePassword: true };
+  // 账号国家归属（2026-10-08 审计 C-1）：有区域→区域国家；有门店→门店区域国家；
+  // 无门店无区域时按角色语义（菲律宾相关角色默认 PH），再退到传入 country，缺省 CN。
+  const PH_ROLES = new Set(['philippines_manager', 'regional_manager', 'store_manager', 'manager', 'sales', 'warehouse', 'service']);
+  const storeRegion = store?.regionId ? regions.find(x => x.id === store.regionId) : null;
+  const userCountry = region?.countryCode || storeRegion?.countryCode || (PH_ROLES.has(role) ? 'PH' : (b.country || 'CN'));
+  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, storeId: store?.id || null, regionId: role === 'regional_manager' ? region.id : (region?.id || store?.regionId || null), employeeId: employee?.id || null, phone: controlCenter.cleanText(b.phone, 80), createdAt: nowIso(), disabled: false, mustChangePassword: true, country: userCountry };
   users.push(user); writeAll('users', users);
   if (employee) { employee.userId = user.id; employee.name = name; if (!employee.storeId && store) employee.storeId = store.id; if (!employee.regionId) employee.regionId = user.regionId; employee.updatedAt = nowIso(); writeAll('employees', employees); }
   if (role === 'manager' && store) { store.managerId = user.id; store.managerName = name; writeAll('stores', stores); }
@@ -2292,11 +2323,14 @@ app.post('/api/v2/workflows', (req, res) => {
   if (linkedStore && type === 'store_remediation') form.storeName = linkedStore.name;
   if (scope.level === 'store' && !storeId) return res.status(403).json({ error: '账号尚未绑定门店' });
   const regionId = scope.level === 'region' ? scope.regionId : (linkedStore?.regionId || null);
-  const scopeResource = { storeId, regionId, country: 'PH', createdBy: u.id };
+  // 2026-10-08 审计 C-1：country 从真实归属推导，不再硬编码 'PH'。
+  // 门店归属的 country 已由 migrate 回填；集团级（无门店）用创建者账号的 country。
+  const wfCountry = countryOf({ regionId, storeId }, ...(() => { const ix = countryIndexes(); return [ix.regionIndex, ix.storeIndex, ix.orgIndex]; })()) || u.country || 'PH';
+  const scopeResource = { storeId, regionId, country: wfCountry, createdBy: u.id };
   if (!guard.check(req, res, 'workflow.create', scopeResource)) return;
   let assignee = null;
   if (type === 'store_remediation' && form.assigneeId) {
-    if (!guard.checkPerm(req, res, 'task.assign') || !guard.check(req, res, 'task.assign', { storeId, regionId, country: 'PH', createdBy: u.id })) return;
+    if (!guard.checkPerm(req, res, 'task.assign') || !guard.check(req, res, 'task.assign', { storeId, regionId, country: wfCountry, createdBy: u.id })) return;
     assignee = (readAll('users') || []).find(x => x.id === form.assigneeId && !x.disabled);
     if (!assignee) return res.status(400).json({ error: '整改负责人账号不存在或已停用' });
     const assignment = rbac.canAssign(u, assignee, 'task');
@@ -2306,7 +2340,7 @@ app.post('/api/v2/workflows', (req, res) => {
   delete form.assigneeId;
   const items = readAll('workflowInstances') || [];
   const spec = controlCenter.WORKFLOW_TYPES[type];
-  const item = { id: nanoid(), type, title: controlCenter.cleanText(b.title || spec.label, 180), status: 'pending_approval', assigneeId: assignee?.id || null, assigneeName: assignee ? (assignee.name || assignee.username) : null, form, definitionId: null, definitionVersion: 1, storeId, warehouseId, regionId, organizationId: b.organizationId || null, sourceInspectionId: sourceInspection?.id || null, createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), currentStep: 0, approvalSlaHours: null, approvalDueAt: null, approvalReminderAt: null, approvalDelegations: [], executionRound: 0, externalDocumentNumber: null, executionStatus: null, executedBy: null, executedAt: null, comments: [], attachments: [] };
+  const item = { id: nanoid(), type, title: controlCenter.cleanText(b.title || spec.label, 180), status: 'pending_approval', assigneeId: assignee?.id || null, assigneeName: assignee ? (assignee.name || assignee.username) : null, form, definitionId: null, definitionVersion: 1, storeId, warehouseId, regionId, organizationId: b.organizationId || null, sourceInspectionId: sourceInspection?.id || null, createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), country: wfCountry, currentStep: 0, approvalSlaHours: null, approvalDueAt: null, approvalReminderAt: null, approvalDelegations: [], executionRound: 0, externalDocumentNumber: null, executionStatus: null, executedBy: null, executedAt: null, comments: [], attachments: [] };
   const def = (readAll('workflowDefinitions') || []).find(x => x.type === type && x.active !== false);
   item.definitionId = def ? def.id : null;
   item.definitionVersion = def ? Number(def.version || 1) : 1;
@@ -2505,7 +2539,12 @@ app.post('/api/v2/workflows/:id/actions', (req, res) => {
   if (!result.ok) return res.status(409).json({ error: result.error });
   if (action === 'approve') {
     item.stepApprovals = item.stepApprovals || [];
+    // 2026-10-08 审计 H-3：会签（all 模式）去重键必须是「实际签署人」而非「席位」。
+    // 同一人若身兼多席（如 admin + owner + philippines_manager），
+    // 按 approverKey 去重会让他一人签满多个名额，失去多人共审意义。
     const step = item.approvalSteps[item.currentStep];
+    const alreadySignedByThisUser = (item.stepApprovals || []).some(x => x.step === item.currentStep && x.actorId === u.id);
+    if (alreadySignedByThisUser) return res.status(409).json({ error: '您已在本步骤签署过，会签需由不同审批人完成' });
     const approverKey = req.workflowApproverKey;
     item.stepApprovals.push({ step: item.currentStep, actorId: u.id, approverKey, createdAt: nowIso() });
     const satisfied = step.mode !== 'all' || step.approvers.every(a => item.stepApprovals.some(x => x.step === previousStep && x.approverKey === `${a.kind}:${a.id}`));
@@ -2792,10 +2831,10 @@ app.post('/api/v2/store-reports', (req, res) => {
   if (!guard.checkPerm(req, res, 'task.create')) return;
   const b = req.body || {}, scope = guard.scopeOf(req, 'task.create'), storeId = scope.level === 'store' ? u.storeId : b.storeId;
   const store = (readAll('stores') || []).find(x => x.id === storeId); if (!store) return res.status(400).json({ error: '请选择有效门店' });
-  if (!guard.check(req, res, 'task.create', { storeId, regionId: store.regionId, country: 'PH' })) return;
+  if (!guard.check(req, res, 'task.create', { storeId, regionId: store.regionId, country: store.country || 'PH' })) return;
   const reportDate = controlCenter.cleanText(b.reportDate, 10);
   if (!isIsoCalendarDate(reportDate)) return res.status(400).json({ error: '工作汇报日期无效' });
-  const item = { id: nanoid(), storeId, regionId: store.regionId || null, reportDate, additionalNote: controlCenter.cleanText(b.additionalNote ?? b.salesNote, 2000), incidents: controlCenter.cleanText(b.incidents, 2000), summary: controlCenter.cleanText(b.summary, 4000), createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), attachments: [] };
+  const item = { id: nanoid(), storeId, regionId: store.regionId || null, country: store.country || 'PH', reportDate, additionalNote: controlCenter.cleanText(b.additionalNote ?? b.salesNote, 2000), incidents: controlCenter.cleanText(b.incidents, 2000), summary: controlCenter.cleanText(b.summary, 4000), createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), attachments: [] };
   if (!item.summary && !item.additionalNote && !item.incidents) return res.status(400).json({ error: '请填写工作内容或异常说明' });
   const items = readAll('storeReports') || []; items.unshift(item); writeAll('storeReports', items); recordControlAudit(req, u, 'storeReport.create', 'storeReport', item.id); res.status(201).json({ item });
 });
@@ -2804,12 +2843,12 @@ app.post('/api/v2/store-inspections', (req, res) => {
   if (!guard.checkPerm(req, res, 'task.create')) return;
   const b = req.body || {}, scope = guard.scopeOf(req, 'task.create'), storeId = scope.level === 'store' ? u.storeId : b.storeId;
   const store = (readAll('stores') || []).find(x => x.id === storeId); if (!store) return res.status(400).json({ error: '请选择有效门店' });
-  if (!guard.check(req, res, 'task.create', { storeId, regionId: store.regionId, country: 'PH' })) return;
+  if (!guard.check(req, res, 'task.create', { storeId, regionId: store.regionId, country: store.country || 'PH' })) return;
   const inspectionDate = controlCenter.cleanText(b.inspectionDate, 10), result = ['pass','attention','fail'].includes(b.result) ? b.result : '';
   if (!isIsoCalendarDate(inspectionDate) || !result) return res.status(400).json({ error: '请填写有效日期和巡检结果' });
   const score = b.score === '' || b.score == null ? null : Number(b.score);
   if (score !== null && (!Number.isFinite(score) || score < 0 || score > 100)) return res.status(400).json({ error: '巡检评分须为 0 至 100' });
-  const item = { id: nanoid(), storeId, regionId: store.regionId || null, inspectionDate, result, score, checklist: controlCenter.cleanText(b.checklist, 4000), findings: controlCenter.cleanText(b.findings, 4000), createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), attachments: [] };
+  const item = { id: nanoid(), storeId, regionId: store.regionId || null, country: store.country || 'PH', inspectionDate, result, score, checklist: controlCenter.cleanText(b.checklist, 4000), findings: controlCenter.cleanText(b.findings, 4000), createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), attachments: [] };
   const items = readAll('storeInspections') || []; items.unshift(item); writeAll('storeInspections', items); recordControlAudit(req, u, 'storeInspection.create', 'storeInspection', item.id); res.status(201).json({ item });
 });
 app.post('/api/v2/store-issues', (req, res) => {
@@ -2895,6 +2934,7 @@ app.post('/api/v2/purchase-shipments', (req, res) => {
     ownerName: controlCenter.cleanText(b.ownerName, 80) || (u.name || u.username),
     createdBy: u.id, createdByName: u.name || u.username,
     createdAt: nowIso(), updatedAt: nowIso(),
+    country: u.country || 'PH',
     stageHistory: [{ stage, at: nowIso(), byName: u.name || u.username, note: '' }],
     attachments: [],
   };
@@ -3002,11 +3042,13 @@ app.post('/api/v2/tasks', (req, res) => {
   const knownStores = readAll('stores') || [];
   const linkedStore = knownStores.find(x => x.id === storeId);
   if (storeId && !linkedStore) return res.status(400).json({ error: '门店不存在' });
-  const taskResource = { storeId, warehouseId: null, regionId: linkedStore?.regionId || null, country: 'PH', createdBy: u.id };
+  // 2026-10-08 审计 C-1：country 从真实归属推导，不再硬编码 'PH'
+  const taskCountry = countryOf({ regionId: linkedStore?.regionId || null, storeId }, ...(() => { const ix = countryIndexes(); return [ix.regionIndex, ix.storeIndex, ix.orgIndex]; })()) || u.country || 'PH';
+  const taskResource = { storeId, warehouseId: null, regionId: linkedStore?.regionId || null, country: taskCountry, createdBy: u.id };
   if (!guard.check(req, res, 'task.create', taskResource)) return;
   let assignee = null;
   if (b.assigneeId) {
-    if (!guard.check(req, res, 'task.assign', { storeId, country: 'PH', createdBy: u.id })) return;
+    if (!guard.check(req, res, 'task.assign', { storeId, country: taskCountry, createdBy: u.id })) return;
     assignee = (readAll('users') || []).find(x => x.id === b.assigneeId && !x.disabled);
     if (!assignee) return res.status(400).json({ error: '负责人账号不存在或已停用' });
     const assignment = rbac.canAssign(u, assignee, 'task');
@@ -3016,7 +3058,7 @@ app.post('/api/v2/tasks', (req, res) => {
   if (dueAt && !Number.isFinite(dueAt.getTime())) return res.status(400).json({ error: '截止日期无效' });
   const checklist = normalizeTaskChecklist(b.checklist);
   if (!checklist.ok) return res.status(400).json({ error: checklist.error });
-  const item = { id: nanoid(), title, description: controlCenter.cleanText(b.description, 2000), status: 'open', priority: ['low','normal','high','urgent'].includes(b.priority) ? b.priority : 'normal', assigneeId: assignee?.id || null, assigneeName: assignee?.name || assignee?.username || null, storeId, warehouseId: null, regionId: linkedStore?.regionId || null, dueAt: dueAt ? dueAt.toISOString() : null, createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), completedAt: null, overdueReminderAt: null, checklist: checklist.value, comments: [], attachments: [] };
+  const item = { id: nanoid(), title, description: controlCenter.cleanText(b.description, 2000), status: 'open', priority: ['low','normal','high','urgent'].includes(b.priority) ? b.priority : 'normal', assigneeId: assignee?.id || null, assigneeName: assignee?.name || assignee?.username || null, storeId, warehouseId: null, regionId: linkedStore?.regionId || null, country: taskCountry, dueAt: dueAt ? dueAt.toISOString() : null, createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), completedAt: null, overdueReminderAt: null, checklist: checklist.value, comments: [], attachments: [] };
   const items = readAll('tasks') || []; items.unshift(item); writeAll('tasks', items);
   if (item.assigneeId) notifyUser(item.assigneeId, 'task.assigned', '收到新任务', item.title, 'task', item.id);
   recordControlAudit(req, u, 'task.create', 'task', item.id, { title }); res.status(201).json({ item });
@@ -3114,7 +3156,7 @@ app.post('/api/v2/announcements', (req, res) => {
   const status = req.body?.status === 'draft' ? 'draft' : 'published';
   if (!title || !body) return res.status(400).json({ error: '请填写公告标题和内容' });
   const item = { id: nanoid(), title, body, status, pinned: !!req.body?.pinned,
-    createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso() };
+    createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), country: u.country || 'PH' };
   const items = readAll('announcements') || []; items.unshift(item); writeAll('announcements', items);
   recordControlAudit(req, u, 'announcement.create', 'announcement', item.id, { status, pinned: item.pinned });
   res.status(201).json({ item });
