@@ -31,6 +31,10 @@
 .app-shell .cc-tone-brand { border-top: 3px solid #1D4ED8; }
 .app-shell .cc-tone-danger { border-top: 3px solid #D93F3F; }
 .app-shell .cc-tone-neutral { border-top: 3px solid #8A909B; }
+.app-shell .cc-tone-success { border-top: 3px solid #0E9F6E; }
+.app-shell .cc-tone-success strong, .app-shell .cc-tone-success small { color: var(--ok-ink); }
+.app-shell .cc-tone-error { border-top: 3px solid #D93F3F; }
+.app-shell .cc-tone-error strong, .app-shell .cc-tone-error small { color: var(--danger-ink); }
 .app-shell .cc-announcement-ticker { margin: 16px 0 24px; border-color: var(--line); border-left: 3px solid #1D4ED8; background: var(--surface); color: var(--ink); }
 .app-shell .cc-announcement-ticker button { color: var(--brand); }
 .app-shell .cc-announcement-ticker:focus-within .cc-ticker-content { animation-play-state: paused; }

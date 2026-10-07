@@ -632,13 +632,24 @@ async function renderControlCenter(root) {
   const approverAccounts = (accountData.items || []).filter(x => !x.disabled);
   const remediationCounts = workflowData.countsByType?.store_remediation || {};
   const openRemediationCount = ['pending_approval','returned','approved','execution_pending','awaiting_review'].reduce((sum, status) => sum + Number(remediationCounts[status] || 0), 0);
-  const metric = (label, value, area, tone, actionable = false) => `<button type="button" class="card cc-overview-card cc-tone-${tone}" data-cc-jump="${area}" ${actionable ? 'data-cc-actionable-jump' : ''}><span>${label}</span><strong>${Number.isFinite(value) ? value.toLocaleString() : ccText('Unavailable', '读取失败')}</strong><small>${ccText('Open details', '查看详情')} →</small></button>`;
+  const metric = (label, value, area, tone, actionable = false) => {
+    const failed = !Number.isFinite(value), empty = value === 0;
+    return `<button type="button" class="card cc-overview-card cc-tone-${failed ? 'error' : empty ? 'success' : tone}" ${failed ? 'data-cc-retry' : `data-cc-jump="${area}" ${actionable ? 'data-cc-actionable-jump' : ''}`}><span>${label}</span><strong>${failed ? ccText('Unavailable', '读取失败') : value.toLocaleString()}</strong><small>${failed ? ccText('Retry', '重试加载') : empty ? ccText('✓ Clear', '✓ 已清空') : ccText('Open details', '查看详情') + ' →'}</small></button>`;
+  };
   const count = value => value == null || !Number.isFinite(Number(value)) ? NaN : Number(value);
   const recentMatters = [
     ...(recentWorkflowData.items || []).filter(w => ACTIVE_CONTROL_TYPES[w.type]).map(w => ({ title: w.title, type: ccText('Approval', '审批'), status: ccStatus(w.status), area: 'approvals', date: w.updatedAt || w.createdAt })),
     ...(recentTaskData.items || []).map(task => ({ title: task.title, type: ccText('Task', '任务'), status: ccStatus(task.status), area: 'collaboration', date: task.updatedAt || task.createdAt })),
   ].sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 5);
-  const formattedDate = value => { const date = new Date(value); return Number.isNaN(date.getTime()) ? '' : date.toLocaleString(); };
+  const formattedDate = value => {
+    const date = new Date(value), diff = Date.now() - date.getTime();
+    if (Number.isNaN(date.getTime())) return '';
+    if (diff < 0 || diff >= 7 * 86400000) return date.toLocaleDateString();
+    if (diff < 60000) return ccText('Just now', '刚刚');
+    if (diff < 3600000) return `${Math.floor(diff / 60000)} ${ccText('min ago', '分钟前')}`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)} ${ccText('h ago', '小时前')}`;
+    return `${Math.floor(diff / 86400000)} ${ccText('d ago', '天前')}`;
+  };
   const assignees = assigneeData.items || [];
   const auditEvents = auditData.items || [];
   const storeReports = operationData.reports || [], storeInspections = operationData.inspections || [], storeIssues = operationData.issues || [];
@@ -779,6 +790,7 @@ async function renderControlCenter(root) {
   const setNavBadge = (id, value) => { const badge = $(id); if (!badge) return; badge.hidden = !Number.isFinite(value) || value <= 0; badge.textContent = Number.isFinite(value) ? String(value) : ''; };
   setNavBadge('#navApprovalCount', mayViewWorkflows ? count(workflowData.pendingForMe) : 0);
   setNavBadge('#navTaskCount', mayViewTasks && taskData.counts ? count(taskData.counts.open || 0) + count(taskData.counts.in_progress || 0) : 0);
+  root.querySelectorAll('[data-cc-retry]').forEach(button => button.addEventListener('click', () => renderControlCenter(root)));
   root.querySelectorAll('[data-cc-tab]').forEach(button => button.addEventListener('click', () => setWorkspace(button.dataset.ccTab)));
   root.querySelectorAll('[data-cc-jump]').forEach(button => button.addEventListener('click', async () => {
     if (button.hasAttribute('data-cc-recent')) {
