@@ -4,6 +4,11 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#0f766e" />
+  <!-- PWA 图标：iOS Safari 添加到主屏必须用 PNG apple-touch-icon（不支持 SVG）；
+       manifest 内也提供 192/512 + maskable 位图，供 Android 安装与分享卡使用。 -->
+  <link rel="apple-touch-icon" href="/pwa-icon-180.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="/pwa-icon-192.png" />
+  <link rel="icon" type="image/svg+xml" href="/pwa-icon.svg" />
   <link rel="manifest" href="/manifest.webmanifest" />
   <title>NSS Solar · 中控平台</title>
   <link rel="stylesheet" href="/styles.css?v=43" />

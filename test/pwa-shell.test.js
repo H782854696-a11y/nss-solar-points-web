@@ -6,6 +6,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
+const shellSource = fs.readFileSync(path.join(__dirname, '..', 'public', 'service-worker.js'), 'utf8');
+// 缓存版本号以 service-worker.js 为准，测试不再硬编码（bump 缓存时无需改测试）
+const currentCache = 'nss-control-shell-v' + shellSource.match(/CACHE_PREFIX\}(\d+)`/)[1];
+
 test('PWA shell survives versioned offline URLs and preserves unrelated caches', async () => {
   const listeners = new Map();
   const stores = new Map([
@@ -69,7 +73,8 @@ test('PWA shell survives versioned offline URLs and preserves unrelated caches',
   assert.equal(claimed, true);
   assert.equal(stores.has('nss-control-shell-v11'), false);
   assert.equal(stores.has('unrelated-member-cache'), true);
-  assert.equal(stores.has('nss-control-shell-v21'), true);
+  // 缓存版本号从 service-worker.js 动态读取，避免每次 bump 缓存都要改测试
+  assert.equal(stores.has(currentCache), true);
 
   async function resource(url, mode = 'no-cors') {
     let responsePromise;
@@ -89,5 +94,9 @@ test('PWA shell survives versioned offline URLs and preserves unrelated caches',
   assert.equal(await resource('/api/v2/workflows'), undefined);
   online = true;
   assert.equal((await resource('/app.js?v=51')).name, '/app.js?v=51');
-  assert.equal(stores.get('nss-control-shell-v21').has('/app.js?v=51'), true);
+  assert.equal(stores.get(currentCache).has('/app.js?v=51'), true);
+  // 预缓存清单必须包含安装所需的 PNG 图标（iOS apple-touch-icon 等）
+  for (const icon of ['/pwa-icon-180.png', '/pwa-icon-192.png', '/pwa-icon-512.png', '/pwa-icon-maskable-512.png']) {
+    assert.equal(stores.get(currentCache).has(icon), true, `PWA 图标未预缓存: ${icon}`);
+  }
 });

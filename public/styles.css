@@ -221,6 +221,9 @@ button, input, select, textarea { font-family: inherit; }
   .login-title { font-size: 27px; letter-spacing: .04em; text-align: center; }
   .login-subtitle { font-size: 11px; letter-spacing: .3em; text-indent: .3em; }
   .login-panel { width: 100%; margin-top: 32px; padding: 26px 22px 24px; }
+  /* iOS Safari 聚焦输入框时，若字号 <16px 会自动放大整个页面导致布局错位。
+     手机上统一抬到 16px（桌面保持 14px 不变）。 */
+  .login-panel input { font-size: 16px; }
 }
 
 /* =================== App Shell =================== */
