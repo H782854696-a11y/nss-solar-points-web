@@ -193,7 +193,7 @@ app.post('/api/auth/change-password', (req, res) => {
   if (!u) return res.status(401).json({ error: '未登录' });
   const { currentPassword, newPassword } = req.body || {};
   if (!currentPassword || !newPassword) return res.status(400).json({ error: '请填写当前密码和新密码' });
-  if (newPassword.length < 12) return res.status(400).json({ error: '新密码至少 12 位' });
+  if (newPassword.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
   const users = readAll('users');
   const user = users.find(x => x.id === u.id);
   if (!user || !bcrypt.compareSync(currentPassword, user.password)) {
@@ -1121,7 +1121,7 @@ app.post('/api/stores/:id/managers', (req, res) => {
   }
   const b = req.body || {};
   if (!b.username || !b.name || !b.password) return res.status(400).json({ error: '请填写用户名、姓名、初始密码' });
-  if (b.password.length < 12) return res.status(400).json({ error: '初始密码至少 12 位' });
+  if (b.password.length < 6) return res.status(400).json({ error: '初始密码至少 6 位' });
   const users = readAll('users');
   const username = String(b.username).trim();
   const existing = users.find(x => x.username === username);
@@ -1366,7 +1366,7 @@ app.post('/api/users/:id/reset-password', (req, res) => {
   const b = req.body || {};
   const newPassword = typeof b.newPassword === 'string' ? b.newPassword : '';
   if (!newPassword) return res.status(400).json({ error: '请填写新密码' });
-  if (newPassword.length < 12) return res.status(400).json({ error: '新密码至少 12 位' });
+  if (newPassword.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
 
   target.password = bcrypt.hashSync(newPassword, 12);
   target.mustChangePassword = true;
@@ -2058,7 +2058,7 @@ app.post('/api/v2/users', (req, res) => {
   const password = String(b.password || ''), role = String(b.role || '');
   const allowedRoles = ['admin','owner','hq_operator','philippines_manager','regional_manager','manager','sales','warehouse','service'];
   if (!/^[a-zA-Z0-9_]{3,48}$/.test(username)) return res.status(400).json({ error: '用户名须为 3 至 48 位英文字母、数字或下划线' });
-  if (!name || password.length < 12) return res.status(400).json({ error: '请填写姓名，并设置至少 12 位的初始密码' });
+  if (!name || password.length < 6) return res.status(400).json({ error: '请填写姓名，并设置至少 6 位的初始密码' });
   if (!allowedRoles.includes(role)) return res.status(400).json({ error: '角色无效' });
   const users = readAll('users') || [];
   if (users.some(x => x.username.toLowerCase() === username.toLowerCase())) return res.status(409).json({ error: '用户名已存在' });

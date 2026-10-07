@@ -207,8 +207,8 @@ function renderMandatoryPasswordChange() {
     <div class="login-subtitle">${zh ? '首次登录前必须更换临时密码' : 'Change the temporary password before continuing'}</div>
     <form id="mandatoryPasswordForm" class="login-panel">
       <label class="field"><span class="field-label">${zh ? '当前临时密码' : 'Current temporary password'}</span><span class="input-wrap"><input name="currentPassword" type="password" autocomplete="current-password" required/></span></label>
-      <label class="field"><span class="field-label">${zh ? '新密码（至少 12 位）' : 'New password (12 characters minimum)'}</span><span class="input-wrap"><input name="newPassword" type="password" autocomplete="new-password" required minlength="12"/></span></label>
-      <label class="field"><span class="field-label">${zh ? '确认新密码' : 'Confirm new password'}</span><span class="input-wrap"><input name="confirmPassword" type="password" autocomplete="new-password" required minlength="12"/></span></label>
+      <label class="field"><span class="field-label">${zh ? '新密码（至少 6 位）' : 'New password (6 characters minimum)'}</span><span class="input-wrap"><input name="newPassword" type="password" autocomplete="new-password" required minlength="6"/></span></label>
+      <label class="field"><span class="field-label">${zh ? '确认新密码' : 'Confirm new password'}</span><span class="input-wrap"><input name="confirmPassword" type="password" autocomplete="new-password" required minlength="6"/></span></label>
       <div id="mandatoryPasswordError" class="login-error" aria-live="polite"></div>
       <button class="login-submit" type="submit">${zh ? '保存并继续' : 'Save and continue'}</button>
       <button id="mandatoryPasswordLogout" class="btn" type="button" style="width:100%;margin-top:10px;">${zh ? '退出登录' : 'Sign out'}</button>
@@ -3024,7 +3024,7 @@ function openManagerForm(storeId) {
           <label><span>${t('managerForm.name')}</span><input name="name" required placeholder="Maria Cruz"/></label>
         </div>
         <div class="modal-form-row col2">
-          <label><span>${t('managerForm.password')}</span><input name="password" type="password" autocomplete="new-password" required minlength="12" placeholder="${escapeHtml(t('managerForm.passwordPh'))}"/></label>
+          <label><span>${t('managerForm.password')}</span><input name="password" type="password" autocomplete="new-password" required minlength="6" placeholder="${escapeHtml(t('managerForm.passwordPh'))}"/></label>
           <label><span>${t('managerForm.phone')}</span><input name="phone" placeholder="0917 000 0000"/></label>
         </div>
         <div class="modal-form-error"></div>
@@ -3783,7 +3783,7 @@ async function renderAccounts(root) {
       <div class="page-spacer"></div>
     </div>
     <div class="cc-workspace-stats">${uiStat(ccText('Total accounts', '账号总数'), items.length, 'brand')}${uiStat(ccText('Enabled', '启用中'), enabledCount, 'success')}${uiStat(ccText('Disabled', '已停用'), items.length - enabledCount, 'neutral')}${uiStat(ccText('Store linked', '关联门店'), storeAccountCount, 'warning')}</div>
-    ${canEdit ? `<section class="card cc-section"><h3>${ccText('Create login account', '创建登录账号')}</h3><p>${ccText('Set a unique username and a temporary password of at least 12 characters. Store and regional roles must be bound to their scope.', '用户名须唯一，初始密码至少 12 位。门店和区域岗位必须绑定对应范围。')}</p><form id="ccAccountForm" class="cc-form-grid"><label class="cc-field"><span>${ccText('Username', '用户名')}</span><input name="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9_]+"/></label><label class="cc-field"><span>${ccText('Full name', '姓名')}</span><input name="name" required maxlength="120"/></label><label class="cc-field"><span>${ccText('Initial password (12+ characters)', '初始密码（至少 12 位）')}</span><input name="password" type="password" required minlength="12" autocomplete="new-password"/></label><label class="cc-field"><span>${ccText('Role', '角色')}</span><select name="role"><option value="owner">${escapeHtml(roleLabel('owner'))}</option><option value="hq_operator">${escapeHtml(roleLabel('hq_operator'))}</option><option value="philippines_manager">${escapeHtml(roleLabel('philippines_manager'))}</option><option value="regional_manager">${escapeHtml(roleLabel('regional_manager'))}</option><option value="manager">${escapeHtml(roleLabel('store_manager'))}</option><option value="sales">${escapeHtml(roleLabel('sales'))}</option><option value="warehouse">${escapeHtml(roleLabel('warehouse'))}</option><option value="service">${escapeHtml(roleLabel('service'))}</option><option value="admin">${escapeHtml(roleLabel('admin'))}</option></select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">${ccText('No store', '不绑定门店')}</option>${state.stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Region', '区域')}</span><select name="regionId"><option value="">${ccText('No region', '不绑定区域')}</option>${accountRegions.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Employee profile', '关联员工档案')}</span><select name="employeeId"><option value="">${ccText('No employee link', '不关联员工')}</option>${accountEmployees.filter(x => !x.userId).map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Phone', '电话')}</span><input name="phone" maxlength="80"/></label><div class="cc-wide"><button class="btn btn-primary" type="submit">${ccText('Create account', '创建账号')}</button></div></form></section>` : ''}
+    ${canEdit ? `<section class="card cc-section"><h3>${ccText('Create login account', '创建登录账号')}</h3><p>${ccText('Set a unique username and a temporary password of at least 6 characters. Store and regional roles must be bound to their scope.', '用户名须唯一，初始密码至少 6 位。门店和区域岗位必须绑定对应范围。')}</p><form id="ccAccountForm" class="cc-form-grid"><label class="cc-field"><span>${ccText('Username', '用户名')}</span><input name="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9_]+"/></label><label class="cc-field"><span>${ccText('Full name', '姓名')}</span><input name="name" required maxlength="120"/></label><label class="cc-field"><span>${ccText('Initial password (6+ characters)', '初始密码（至少 6 位）')}</span><input name="password" type="password" required minlength="6" autocomplete="new-password"/></label><label class="cc-field"><span>${ccText('Role', '角色')}</span><select name="role"><option value="owner">${escapeHtml(roleLabel('owner'))}</option><option value="hq_operator">${escapeHtml(roleLabel('hq_operator'))}</option><option value="philippines_manager">${escapeHtml(roleLabel('philippines_manager'))}</option><option value="regional_manager">${escapeHtml(roleLabel('regional_manager'))}</option><option value="manager">${escapeHtml(roleLabel('store_manager'))}</option><option value="sales">${escapeHtml(roleLabel('sales'))}</option><option value="warehouse">${escapeHtml(roleLabel('warehouse'))}</option><option value="service">${escapeHtml(roleLabel('service'))}</option><option value="admin">${escapeHtml(roleLabel('admin'))}</option></select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">${ccText('No store', '不绑定门店')}</option>${state.stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Region', '区域')}</span><select name="regionId"><option value="">${ccText('No region', '不绑定区域')}</option>${accountRegions.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Employee profile', '关联员工档案')}</span><select name="employeeId"><option value="">${ccText('No employee link', '不关联员工')}</option>${accountEmployees.filter(x => !x.userId).map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Phone', '电话')}</span><input name="phone" maxlength="80"/></label><div class="cc-wide"><button class="btn btn-primary" type="submit">${ccText('Create account', '创建账号')}</button></div></form></section>` : ''}
     <div class="card" style="padding:11px 16px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--muted);">
       <span>${escapeHtml(summary)}</span>
       <span style="flex:1;"></span>
@@ -3874,7 +3874,7 @@ function resetPasswordDialog(account) {
         <div style="margin-top:14px;display:flex;gap:8px;align-items:flex-end;">
           <label style="flex:1;display:flex;flex-direction:column;gap:6px;">
             <span style="font-size:12px;color:var(--muted);">${escapeHtml(t('accounts.resetPwLabel'))}</span>
-            <input type="password" id="rpNew" autocomplete="new-password" minlength="12"
+            <input type="password" id="rpNew" autocomplete="new-password" minlength="6"
                    style="height:38px;padding:0 12px;border:1px solid var(--line);border-radius:8px;font-size:13px;" />
           </label>
           <button class="btn btn-sm" id="rpGen" type="button" style="height:38px;">${escapeHtml(t('accounts.resetPwGenerate'))}</button>
@@ -3895,7 +3895,7 @@ function resetPasswordDialog(account) {
     root.addEventListener('click', e => { if (e.target === root) finish(false); });
     $('#rpOk', root).addEventListener('click', async () => {
       const pw = input.value || '';
-      if (pw.length < 12) { err.textContent = t('accounts.resetPwNeed12'); return; }
+      if (pw.length < 6) { err.textContent = t('accounts.resetPwNeed6'); return; }
       try {
         await POST('/api/users/' + encodeURIComponent(account.id) + '/reset-password', { newPassword: pw });
         finish(true);
@@ -3970,10 +3970,10 @@ function renderAccount(root) {
             <label><span>${t('account.currentPwd')}</span><input type="password" name="currentPassword" required/></label>
           </div>
           <div class="modal-form-row">
-            <label><span>${t('account.newPwd')}</span><input type="password" name="newPassword" required minlength="12"/></label>
+            <label><span>${t('account.newPwd')}</span><input type="password" name="newPassword" required minlength="6"/></label>
           </div>
           <div class="modal-form-row">
-            <label><span>${t('account.confirmPwd')}</span><input type="password" name="confirmPassword" required minlength="12"/></label>
+            <label><span>${t('account.confirmPwd')}</span><input type="password" name="confirmPassword" required minlength="6"/></label>
           </div>
           <div class="modal-form-error" id="pwdError"></div>
           <button class="btn btn-primary" type="submit" style="margin-top:8px;">${t('account.changePwd')}</button>

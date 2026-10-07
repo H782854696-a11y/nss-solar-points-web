@@ -4,7 +4,7 @@
 // 背景：密码是 bcrypt 单向哈希，旧的**查不到**，只能重置（用户 2026-09-24 授权新增）。
 // 覆盖：
 //   · 鉴权 401 / 403（含数据范围）
-//   · 404 / 新密码缺失 / 新密码 < 12 位 → 400
+//   · 404 / 新密码缺失 / 新密码 < 6 位 → 400
 //   · 不能在这里重置自己的密码 → 400（自己走「账号设置」）
 //   · 成功重置：新密码能登录、**旧密码失效**、目标账号旧会话被作废、
 //     dataVersion 变化、审计留痕、**响应体里绝不出现密码或哈希**
@@ -163,9 +163,9 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
   const before = JSON.stringify(userById('U-victim'));
   ok('缺 newPassword → 400', (await as('t_admin', 'POST', '/api/users/U-victim/reset-password', {})).status === 400);
   ok('newPassword 非字符串 → 400', (await as('t_admin', 'POST', '/api/users/U-victim/reset-password', { newPassword: 123456 })).status === 400);
-  const short = await reset('t_admin', 'U-victim', '12345678901');
-  ok('新密码 11 位 → 400', short.status === 400, short.status);
-  ok('文案是「新密码至少 12 位」', short.data.error === '新密码至少 12 位', short.data);
+  const short = await reset('t_admin', 'U-victim', '12345');
+  ok('新密码 5 位 → 400', short.status === 400, short.status);
+  ok('文案是「新密码至少 6 位」', short.data.error === '新密码至少 6 位', short.data);
   const self = await reset('t_admin', 'U-admin', NEW_PW);
   ok('重置自己 → 400', self.status === 400, self.status);
   ok('文案引导用「账号设置」', /账号设置/.test(self.data.error), self.data);
@@ -232,7 +232,7 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
   ok('权限门用既有 system.user.edit（不新增权限）', /checkPerm\(req, res, 'system\.user\.edit'\)/.test(epBody));
   ok('范围门对目标资源判定', /check\(req, res, 'system\.user\.edit', target\)/.test(epBody));
   ok('禁止重置自己（自我护栏）', /reset-password rejected \(self\)/.test(epBody));
-  ok('长度校验 ≥ 12', /newPassword\.length < 12/.test(epBody));
+  ok('长度校验 ≥ 6', /newPassword\.length < 6/.test(epBody));
   ok('用 bcrypt 12 轮写入新哈希', /bcrypt\.hashSync\(newPassword, 12\)/.test(epBody));
   ok('重置后作废该账号全部旧会话', /sessions\.delete\(sid\)/.test(epBody));
   ok('写入走 writeAll(\'users\')、并写审计', /writeAll\('users', users\)/.test(epBody) && /auditLog\(`reset-password: /.test(epBody));
@@ -264,10 +264,10 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
     /reset-password/.test(rpdFn) &&
     !/POST\('\/api\/users\/.*reset-password/.test(accFn) && !/\bPOST\(/.test(npdFn));
   ok('★ 新密码输入框是 type="password"（不明文显示）', /type="password" id="rpNew"/.test(rpdFn));
-  ok('★ 输入框带 minlength=12 与 autocomplete=new-password',
-    /minlength="12"/.test(rpdFn) && /autocomplete="new-password"/.test(rpdFn));
-  ok('★ 前端自己先校验 <12 位并提示（不靠后端兜底）',
-    /pw\.length < 12/.test(rpdFn) && /accounts\.resetPwNeed12/.test(rpdFn));
+  ok('★ 输入框带 minlength=6 与 autocomplete=new-password',
+    /minlength="6"/.test(rpdFn) && /autocomplete="new-password"/.test(rpdFn));
+  ok('★ 前端自己先校验 <6 位并提示（不靠后端兜底）',
+    /pw\.length < 6/.test(rpdFn) && /accounts\.resetPwNeed6/.test(rpdFn));
   ok('★ 成功后走「一次性展示」弹窗', /showNewPasswordDialog\(account, pw\)/.test(rpdFn));
   ok('★ 一次性展示里有复制按钮与「不再显示」提醒',
     /accounts\.resetPwCopy/.test(npdFn) && /clipboard|execCommand\('copy'\)/.test(npdFn) && /accounts\.resetPwOnce/.test(npdFn));
@@ -290,7 +290,7 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
   const missingKeys = usedKeys.filter(k => !i18nKeys.has(k));
   ok('★ 用到的 ' + usedKeys.length + ' 个 i18n key 全部存在', missingKeys.length === 0, missingKeys);
   const needKeys = ['accounts.resetPw', 'accounts.resetPwTitle', 'accounts.resetPwBody', 'accounts.resetPwLabel',
-    'accounts.resetPwGenerate', 'accounts.resetPwNeed12', 'accounts.resetPwDone', 'accounts.resetPwDoneBody',
+    'accounts.resetPwGenerate', 'accounts.resetPwNeed6', 'accounts.resetPwDone', 'accounts.resetPwDoneBody',
     'accounts.resetPwCopy', 'accounts.resetPwCopied', 'accounts.resetPwOnce'];
   ok('★ 重置密码相关 ' + needKeys.length + ' 个 key 都已登记（中英双语）',
     needKeys.every(k => i18nKeys.has(k)), needKeys.filter(k => !i18nKeys.has(k)));
