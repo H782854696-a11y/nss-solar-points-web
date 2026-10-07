@@ -112,6 +112,10 @@ function bindLangButtons() {
   });
   onChange(() => {
     syncLangButtons();
+    /* 2026-10-07 i18n 修复：语言切换时必须重新应用 data-i18n，
+       否则侧栏静态文案（分组标签、LOGO 副标题、导航项）仍停留在切换前的语言——
+       这正是「英文界面 + 中文菜单」的根因。 */
+    applyStatic();
     if (!state.me) return;
     renderUserBlock();
     updateHeaderCrumb();
@@ -130,6 +134,9 @@ function showLogin() {
 function showApp() {
   $('#loginPage').classList.add('hidden');
   $('#appShell').classList.remove('hidden');
+  /* 2026-10-07 i18n 修复：进入应用时重新应用一次静态文案，
+     保证侧栏分组标签、导航项、LOGO 副标题与当前语言一致。 */
+  applyStatic();
 }
 
 /**
@@ -564,9 +571,22 @@ function ccPagerButtons(kind, data) {
 function ccEmptyState(title, detail, action = '', kind = '') {
   return `<div class="card cc-empty-state"><span class="cc-empty-icon" aria-hidden="true">◇</span><strong>${title}</strong><span>${detail}</span>${action && kind ? `<button type="button" class="btn btn-primary btn-sm" data-cc-quick="${kind}">${action}</button>` : ''}</div>`;
 }
+/* 统计卡三态（2026-10-07 细则整改）：
+   实测原实现把「读取失败」渲染成 20px 红色 Unavailable 占满102px 卡高，
+   用户无法区分「接口失败」与「真实零值」。现改为：
+     - 失败：中文短句 + 说明 + 中性灰左条，不用警戒红
+     - 零值：完成绿左条 + 缩小数字，不占用视觉重量
+     - 正常：保留原有tone 色条 */
 function uiStat(label, value, tone, note = '') {
-  const n = value == null ? NaN : Number(value);
-  return `<div class="cc-detail-stat cc-tone-${Number.isFinite(n) ? tone : 'error'}"><span>${label}</span><strong>${Number.isFinite(n) ? n.toLocaleString() : ccText('Unavailable', '读取失败')}</strong>${note ? `<small>${note}</small>` : ''}</div>`;
+  const raw = value == null || value === '' ? null : value;
+  const n = raw == null ? NaN : Number(raw);
+  if (!Number.isFinite(n)) {
+    return `<div class="cc-detail-stat is-error"><span>${label}</span><strong>${ccText('Not available', '未能读取')}</strong><small>${ccText('Service error, please retry', '接口返回异常，请稍后重试')}</small></div>`;
+  }
+  if (n === 0) {
+    return `<div class="cc-detail-stat is-zero"><span>${label}</span><strong>0</strong>${note ? `<small>${note}</small>` : `<small>${ccText('Nothing yet', '当前无数据')}</small>`}</div>`;
+  }
+  return `<div class="cc-detail-stat cc-tone-${tone}"><span>${label}</span><strong>${n.toLocaleString()}</strong>${note ? `<small>${note}</small>` : ''}</div>`;
 }
 
 function stocktakeCsv(items = []) {
@@ -776,7 +796,7 @@ async function renderControlCenter(root) {
   const openRemediationCount = ['pending_approval','returned','approved','execution_pending','awaiting_review'].reduce((sum, status) => sum + Number(remediationCounts[status] || 0), 0);
   const metric = (label, value, area, tone, actionable = false) => {
     const failed = !Number.isFinite(value), empty = value === 0;
-    return `<button type="button" class="card cc-overview-card cc-tone-${failed ? 'error' : empty ? 'success' : tone}" ${failed ? 'data-cc-retry' : `data-cc-jump="${area}" ${actionable ? 'data-cc-actionable-jump' : ''}`}><span>${label}</span><strong>${failed ? ccText('Unavailable', '读取失败') : value.toLocaleString()}</strong><small>${failed ? ccText('Retry', '重试加载') : empty ? ccText('✓ Clear', '✓ 已清空') : ccText('Open details', '查看详情') + ' →'}</small></button>`;
+    return `<button type="button" class="card cc-overview-card cc-tone-${empty ? 'success' : tone}${failed ? ' is-error' : ''}" ${failed ? 'data-cc-retry' : `data-cc-jump="${area}" ${actionable ? 'data-cc-actionable-jump' : ''}`}><span>${label}</span><strong>${failed ? ccText('Not available', '未能读取') : value.toLocaleString()}</strong><small>${failed ? ccText('Retry', '重试加载') : empty ? ccText('✓ Clear', '✓ 已清空') : ccText('Open details', '查看详情') + ' →'}</small></button>`;
   };
   const count = value => value == null || !Number.isFinite(Number(value)) ? NaN : Number(value);
   const recentMatters = [
@@ -902,7 +922,7 @@ async function renderControlCenter(root) {
         ${can('announcement.manage') ? `<button type="button" data-cc-quick="announcement"><span aria-hidden="true">✦</span><span>${ccText('Publish announcement', '发布内容公告')}</span><b aria-hidden="true">→</b></button>` : ''}
       </div></section>
       <section class="card cc-dashboard-panel"><h3>${ccText('Recent matters', '最近事项')}</h3><div class="cc-dashboard-list">${recentMatters.map(x => `<button type="button" data-cc-jump="${x.area}" data-cc-recent><span><em>${escapeHtml(x.type)}</em><strong>${escapeHtml(x.title)}</strong><small>${escapeHtml(formattedDate(x.date))}</small></span><span class="cc-list-status">${escapeHtml(x.status)} →</span></button>`).join('') || `<span class="cc-muted">${ccText('No recent matters', '暂无最近事项')}</span>`}</div></section>
-      <section class="card cc-dashboard-panel"><h3>${ccText('Reminders', '待办提醒')}</h3><div class="cc-dashboard-list">${mayViewWorkflows ? `<button type="button" data-cc-jump="approvals" data-cc-actionable-jump><span>${ccText('Pending approvals', '待我审批')}</span><strong class="cc-count-badge">${escapeHtml(String(workflowData.pendingForMe ?? ccText('Unavailable','读取失败')))}</strong></button>` : ''}${mayViewTasks ? `<button type="button" data-cc-jump="collaboration"><span>${ccText('Open tasks', '未完成任务')}</span><strong class="cc-count-badge">${taskData.counts ? Number(taskData.counts.open || 0) + Number(taskData.counts.in_progress || 0) : ccText('Unavailable','读取失败')}</strong></button>` : ''}<button type="button" data-cc-jump="collaboration"><span>${ccText('Unread notifications', '未读通知')}</span><strong class="cc-count-badge">${escapeHtml(String(noticeData.unread ?? ccText('Unavailable','读取失败')))}</strong></button></div></section>
+      <section class="card cc-dashboard-panel"><h3>${ccText('Reminders', '待办提醒')}</h3><div class="cc-dashboard-list">${mayViewWorkflows ? `<button type="button" data-cc-jump="approvals" data-cc-actionable-jump><span>${ccText('Pending approvals', '待我审批')}</span><strong class="cc-count-badge">${escapeHtml(String(workflowData.pendingForMe ?? ccText('Not available','未能读取')))}</strong></button>` : ''}${mayViewTasks ? `<button type="button" data-cc-jump="collaboration"><span>${ccText('Open tasks', '未完成任务')}</span><strong class="cc-count-badge">${taskData.counts ? Number(taskData.counts.open || 0) + Number(taskData.counts.in_progress || 0) : ccText('Not available','未能读取')}</strong></button>` : ''}<button type="button" data-cc-jump="collaboration"><span>${ccText('Unread notifications', '未读通知')}</span><strong class="cc-count-badge">${escapeHtml(String(noticeData.unread ?? ccText('Not available','未能读取')))}</strong></button></div></section>
     </div><div class="cc-detail-heading" hidden><strong id="ccDetailTitle"></strong><small id="ccDetailSubtitle"></small></div><div class="cc-workspace-stats" hidden></div></section>
     <section class="cc-section cc-ann-section" data-cc-area="announcements">
       <div class="cc-ann-head">
@@ -3482,24 +3502,36 @@ function paintDbTable() {
     const s = String(v);
     if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(s)) return `<span class="mono" style="color:#718078;">${fmtTime(s)}</span>`;
     if (isJsonLike(s)) return `<span class="mono" style="color:#9AA8A2;">${escapeHtml(s.slice(0, 36))}…</span>`;
-    return escapeHtml(s.length > 200 ? s.slice(0, 200) + '…' : s);
+    const out = s.length > 200 ? s.slice(0, 200) + '…' : s;
+    return /[\u4e00-\u9fa5]/.test(out) ? `<span title="${escapeHtml(out)}">${escapeHtml(tMsg(out))}</span>` : escapeHtml(out);
   };
   const totalPages = Math.max(1, Math.ceil(d.total / d.pageSize));
+  /* 2026-10-07 细则整改：实测发现 _id 是22 位数据库主键（如 kjKV8sUQtw48FRkAz3g0KWV），
+     占约 180px 宽且无可读价值。默认隐藏该列，用户点「显示 ID」后再展开。
+     纯前端实现，不改后端、不改数据。 */
+  const ID_KEYS = new Set(['_id', 'id', '_key', 'key']);
+  const isIdCol = c => ID_KEYS.has(String(c.key || c.label || '').trim());
+  const showId = !!state.dbShowId;
+  const visibleCols = showId ? cols : cols.filter(c => !isIdCol(c));
+  const hiddenIdCount = cols.length - visibleCols.length;
   box.innerHTML = `
+    <div class="raw-tbl-head">
+      <span class="raw-tbl-info">${d.totalLabel ? escapeHtml(tMsg(d.totalLabel)) : ''}${hiddenIdCount > 0 ? ` · <button type="button" class="link-btn" data-db-toggle-id>${showId ? ccText('Hide ID column', '隐藏 ID 列') : ccText(`Show ID column (${hiddenIdCount})`, `显示 ID 列（${hiddenIdCount}）`)}</button>` : ''}</span>
+    </div>
     <div class="raw-tbl-scroll">
       <table class="raw-tbl ${d.kind === 'lines' ? 'wrap' : ''}">
         <thead><tr>
           <th class="idx">#</th>
-          ${cols.map(c => `<th>${escapeHtml(tMsg(c.label))}</th>`).join('')}
+          ${visibleCols.map(c => `<th>${escapeHtml(tMsg(c.label))}</th>`).join('')}
           <th class="act"></th>
         </tr></thead>
         <tbody>
           ${d.items.length === 0
-            ? `<tr><td colspan="${cols.length + 2}" class="empty">${d.filtered ? t('db.noMatch') : t('db.emptyTable')}</td></tr>`
+            ? `<tr><td colspan="${visibleCols.length + 2}" class="empty">${d.filtered ? t('db.noMatch') : t('db.emptyTable')}</td></tr>`
             : d.items.map((it, i) => `
               <tr>
                 <td class="idx mono">${(d.page - 1) * d.pageSize + i + 1}</td>
-                ${cols.map(c => {
+                ${visibleCols.map(c => {
                   const raw = plain(it[c.key]);
                   const tip = raw.length > 40 ? ` title="${escapeHtml(raw.slice(0, 400))}"` : '';
                   return `<td${tip}>${cellHtml(it[c.key])}</td>`;
@@ -3574,6 +3606,10 @@ function bindDbHandlers() {
 
     const tab = e.target.closest('[data-db-key]');
     if (tab) { await selectDbCollection(tab.dataset.dbKey, 1); return; }
+
+    /* 2026-10-07 细则整改：ID 列显示开关（纯前端，不重新请求接口） */
+    const idToggle = e.target.closest('[data-db-toggle-id]');
+    if (idToggle) { state.dbShowId = !state.dbShowId; paintDbTable(); return; }
 
     const pg = e.target.closest('[data-db-page]') || e.target.closest('.pager-btn[data-page]');
     if (pg) {

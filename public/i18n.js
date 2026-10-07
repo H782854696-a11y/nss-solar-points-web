@@ -81,6 +81,44 @@
     'nav.accounts': ['Accounts', '账号管理'],
     'nav.menu': ['Menu', '菜单'],
 
+    /* ============ 集团中控 V2：侧栏与工作区 ============
+       这些键对应 index.html 里原先硬编码的中文。菲律宾门店员工默认看英文，
+       侧栏必须随语言切换，否则会出现「英文界面 + 中文菜单」。*/
+    'brand.subtitle': ['Group Operations', '集团运营中心'],
+    'nav.groupDailyOps': ['DAILY OPERATIONS', '日常运营'],
+    'nav.groupSystemAudit': ['SYSTEM & AUDIT', '系统与审计'],
+    'nav.workspaceApprovals': ['Approval Center', '审批中心'],
+    'nav.workspaceTasks': ['Tasks & Collab', '任务协作'],
+    'nav.workspaceStoreOps': ['Store Follow-up', '门店跟进'],
+    'nav.workspaceAnnouncements': ['Announcements', '内容公告'],
+    'nav.workspaceGovernance': ['Org & Workflow Setup', '组织与流程设置'],
+    'nav.titleAttr': ['NSS Solar · Group Control', 'NSS Solar · 中控平台'],
+    'login.usernamePh': ['Enter your username', '请输入账号'],
+    'login.passwordPh': ['Enter your password', '请输入密码'],
+
+    /* ============ 数据主库：服务端返回中文标签的英文映射 ============
+       server.js 的 DB_COLLECTIONS 与 DB_FIELD_LABELS 用中文作为 label，
+       前端通过 tMsg() 反查。这里补齐映射，避免改动服务端响应结构。 */
+    '门店': ['Stores', '门店'],
+    '账号': ['Accounts', '账号'],
+    '审批流程': ['Workflows', '审批流程'],
+    '协作任务': ['Tasks', '协作任务'],
+    '内容公告': ['Announcements', '内容公告'],
+    '操作审计日志': ['Audit log', '操作审计日志'],
+    '门店名': ['Store name', '门店名'],
+    '城市': ['City', '城市'],
+    '地址': ['Address', '地址'],
+    '电话': ['Phone', '电话'],
+    '店长姓名': ['Manager name', '店长姓名'],
+    '店长ID': ['Manager ID', '店长ID'],
+    '创建时间': ['Created', '创建时间'],
+    '待分配': ['Unassigned', '待分配'],
+    '—': ['—', '—'],
+    /* 未在DB_FIELD_LABELS 中定义、直接透出字段名的列 */
+    'regionId': ['Region ID', 'regionId'],
+    'storeCode': ['Store code', 'storeCode'],
+    'kingdeeAccount': ['Kingdee account', 'kingdeeAccount'],
+
     // ============ 经营总览 / 门店经营 / 会员经营 ============
     'biz.overview.title': ['Operations Overview', '经营总览'],
     'biz.overview.subtitleAll': ['All stores · {n} stores', '全部门店 · 共 {n} 家'],
@@ -1019,10 +1057,19 @@
     });
     if (LANG === 'en') {
       if (ZH2EN[s]) return ZH2EN[s];
+      /* 2026-10-07：服务端返回的中文标签（集合名、字段名）统一放在 M 里，
+         此处桥接，使 tMsg() 也能查到。原先这些标签只能显示中文。 */
+      const row = M[s];
+      if (row) return row[0];
       for (const [re, fn] of ZH2EN_PATTERNS) { const m = s.match(re); if (m) return fn(m); }
       return s;
     }
     for (const [re, fn] of EN2ZH_PATTERNS) { const m = s.match(re); if (m) return fn(m); }
+    /* 中文态：若 M 里有对应英文键，说明界面传的是英文，反查中文 */
+    const en = s;
+    for (const key of Object.keys(M)) {
+      if (M[key][0] === en) return M[key][1];
+    }
     return s;
   }
 
@@ -1032,7 +1079,10 @@
   function applyStatic(root) {
     const scope = root || global.document;
     if (!scope || !scope.querySelectorAll) return;
-    scope.querySelectorAll('[data-i18n]').forEach(el => { el.textContent = t(el.getAttribute('data-i18n')); });
+    scope.querySelectorAll('[data-i18n]').forEach(el => {
+      if (el.tagName === 'TITLE') { global.document.title = t(el.getAttribute('data-i18n')); return; }
+      el.textContent = t(el.getAttribute('data-i18n'));
+    });
     scope.querySelectorAll('[data-i18n-html]').forEach(el => { el.innerHTML = t(el.getAttribute('data-i18n-html')); });
     scope.querySelectorAll('[data-i18n-ph]').forEach(el => { el.setAttribute('placeholder', t(el.getAttribute('data-i18n-ph'))); });
     scope.querySelectorAll('[data-i18n-title]').forEach(el => { el.setAttribute('title', t(el.getAttribute('data-i18n-title'))); });

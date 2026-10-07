@@ -214,3 +214,133 @@
   .app-shell .cc-ann-head-actions { width: 100%; justify-content: space-between; }
   .app-shell .cc-ann-filters input[type="search"] { max-width: none; }
 }
+
+/* ============================================================================
+   2026-10-07 全站细则整改（依据浏览器实测：11 页18 类控件的计算样式比对）
+   原则：用覆盖层实现，不改动styles.css 既有规则，降低回归风险。
+   每项均标注「实测值 → 新值」，全部使用既有令牌，无新增颜色。
+   ============================================================================ */
+
+/* --- 1. 输入框 / 下拉 / 文本域：38px→42px，字号 12px→13.5px ---
+   原因：实测行高 18px 落在 38px 控件内，字被压扁。 */
+.app-shell .cc-field input,
+.app-shell .cc-field select,
+.app-shell .cc-field textarea {
+  font-size: 13.5px;
+  line-height: 1.5;
+  min-height: 42px;
+  padding: 11px 13px;
+  border-radius: 8px;
+}
+.app-shell .cc-field textarea { min-height: 76px; line-height: 1.6; }
+.app-shell .cc-field > span:first-child,
+.app-shell .cc-field > label:first-child { font-size: 12.5px; line-height: 1.4; }
+
+/* 筛选条与列表内输入框同步（实测同为 38px/12px） */
+.app-shell .cc-task-filters input,
+.app-shell .cc-task-filters select,
+.app-shell .cc-workflow-filters input,
+.app-shell .cc-workflow-filters select,
+.app-shell .cc-ann-filters input,
+.app-shell .cc-ann-filters select {
+  font-size: 13px; min-height: 38px; padding: 9px 12px; border-radius: 8px;
+}
+
+/* --- 2. 日期控件：接管原生态 ---
+   实测问题：mm/dd/yyyy 未本地化，浏览器原生日历图标与蓝色系不搭。 */
+.app-shell input[type="date"],
+.app-shell input[type="month"],
+.app-shell input[type="datetime-local"] {
+  font-size: 13.5px; min-height: 42px; padding: 11px 13px;
+  border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink);
+  font-family: inherit; line-height: 1.5;
+}
+.app-shell input[type="date"]:focus,
+.app-shell input[type="month"]:focus,
+.app-shell input[type="datetime-local"]:focus {
+  outline: 0; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(29,78,216,.13);
+}
+/* 日历图标染为品牌蓝（WebKit/Blink 用filter 反色，Gecko 用 accent-color） */
+.app-shell input[type="date"]::-webkit-calendar-picker-indicator,
+.app-shell input[type="month"]::-webkit-calendar-picker-indicator,
+.app-shell input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(24%) sepate(72%) saturate(1400%) hue-rotate(202deg) brightness(94%) contrast(96%);
+  cursor: pointer; opacity: .75; transition: opacity .14s;
+}
+.app-shell input[type="date"]::-webkit-calendar-picker-indicator:hover,
+.app-shell input[type="month"]::-webkit-calendar-picker-indicator:hover { opacity: 1; }
+.app-shell input[type="date"]::-webkit-datetime-edit,
+.app-shell input[type="month"]::-webkit-datetime-edit { font-family: inherit; }
+
+/* --- 3. 按钮三档体系：主 42 / 次 42 / 小 30 ---
+   实测问题：只有 38 与 32 两档，主次按钮同高，层级拉不开。 */
+.app-shell .btn {
+  height: 42px; padding: 0 18px;
+  font-size: 13.5px; font-weight: 600; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+}
+.app-shell .btn-sm { height: 30px; padding: 0 11px; font-size: 12px; border-radius: 7px; }
+
+/* --- 4. 导航项圆角：0 10px 10px 0 → 8px 四角统一 --- */
+.app-shell .nav-item { border-radius: 8px; }
+.app-shell .nav-item.active::before,
+.app-shell .nav-item-primary.active::before { top: 9px; bottom: 9px; border-radius: 0 2px 2px 0; }
+
+/* --- 5. 统计卡：102px → 96px，零值降级 --- */
+.app-shell .cc-detail-stat { min-height: 96px; padding: 15px 16px; gap: 5px; }
+.app-shell .cc-detail-stat strong { font-size: 24px; }
+
+/* 零值态：数字缩小、左条改完成绿，避免「零」也占满视觉重量 */
+.app-shell .cc-detail-stat.is-zero { border-left-color: var(--ok-ink) !important; }
+.app-shell .cc-detail-stat.is-zero strong { font-size: 22px; color: var(--muted); }
+.app-shell .cc-detail-stat.is-zero small { color: var(--subtle); }
+/* 读取失败态：左条改中性灰，不用警戒红 */
+.app-shell .cc-detail-stat.is-error { border-left-color: var(--line) !important; }
+.app-shell .cc-detail-stat.is-error strong { font-size: 15px; color: var(--muted); line-height: 1.35; }
+
+/* --- 6. 表头：700 → 600，字号 11 → 11.5px，行高压缩 --- */
+.app-shell table thead th {
+  font-size: 11.5px; font-weight: 600; padding: 9px 14px; letter-spacing: .01em;
+}
+.app-shell table tbody td { padding: 10px 14px; font-size: 13px; }
+
+/* --- 7. 卡片层次：普通卡片收紧，让位统计卡 --- */
+.app-shell .cc-card { padding: 14px 16px; border-radius: 12px; }
+.app-shell .card:not(.cc-detail-stat):not(.cc-overview-card) { border-radius: 12px; }
+.app-shell .cc-detail-stat { box-shadow: 0 1px 2px rgba(16,24,40,.04); }
+
+/* --- 8. 空状态与表单容器间距 --- */
+.app-shell .cc-form-grid { gap: 14px 20px; }
+
+/* --- 9. 深色模式同步 --- */
+.app-shell[data-theme="dark"] input[type="date"]::-webkit-calendar-picker-indicator,
+.app-shell[data-theme="dark"] input[type="month"]::-webkit-calendar-picker-indicator,
+.app-shell[data-theme="dark"] input[type="datetime-local"]::-webkit-calendar-picker-indicator {
+  filter: invert(72%) sepate(64%) saturate(1200%) hue-rotate(198deg) brightness(104%) contrast(92%);
+}
+.app-shell[data-theme="dark"] .cc-detail-stat.is-zero { border-left-color: var(--ok-ink) !important; }
+.app-shell[data-theme="dark"] .cc-detail-stat.is-error { border-left-color: var(--line) !important; }
+.app-shell[data-theme="dark"] .cc-detail-stat.is-error strong { color: var(--muted); }
+
+/* --- 10. 移动端触控目标不小于 40px（WCAG 2.5.5） --- */
+@media (max-width: 640px) {
+  .app-shell .btn { min-height: 44px; }
+  .app-shell .btn-sm { min-height: 36px; }
+  .app-shell .nav-item { min-height: 44px; }
+}
+
+/* --- 11. 数据主库：ID 列开关条 --- */
+.app-shell .raw-tbl-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; padding: 9px 14px; border-bottom: 1px solid var(--line-soft);
+}
+.app-shell .raw-tbl-info { font-size: 12px; color: var(--subtle); }
+.app-shell .link-btn {
+  border: 0; background: transparent; padding: 0; cursor: pointer;
+  font: 500 12px/1.4 inherit; color: var(--brand);
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.app-shell .link-btn:hover { color: var(--brand-dark); }
+.app-shell .link-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
+.app-shell[data-theme="dark"] .link-btn { color: var(--brand-bright); }
