@@ -12,7 +12,6 @@ const initialPassword = 'LocalOnlyInitialPassword2026!';
 const changedPassword = 'LocalOnlyChangedPassword2026!';
 const userPassword = 'LocalOnlyUserPassword2026!';
 const userChangedPassword = 'LocalOnlyUserChangedPassword2026!';
-const tinyPng = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/lS8AAAAASUVORK5CYII=';
 
 function freePort() {
   return new Promise((resolve, reject) => {
@@ -25,7 +24,7 @@ function freePort() {
   });
 }
 
-test('remediation assignment, reassignment, evidence rounds and review remain scoped', { timeout: 30000 }, async t => {
+test('store remediation creation is disabled while stocktake upload keeps working', { timeout: 30000 }, async t => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nss-v2-remediation-'));
   const port = await freePort();
   const child = spawn(process.execPath, ['server.js'], {
@@ -105,71 +104,42 @@ test('remediation assignment, reassignment, evidence rounds and review remain sc
   assert.equal(managerTask.data.item.storeId, storeId, 'store manager task is bound to their store');
   const managerTasks = await request('GET', '/api/v2/tasks', null, managerCookie);
   assert.equal(managerTasks.data.items.some(item => item.id === managerTask.data.item.id), true);
-  const created = await request('POST', '/api/v2/workflows', {
+  // 2026-10-07：门店整改已停用新建。
+  // 原用例（108–172 行）整段依赖「新建整改 → 审批 → 指派 → 前后证据 → 复查关闭」，
+  // 该链路已停用，故改为验证三件新规则必须成立：
+  //   1. 任何角色（含 admin）都不能再新建门店整改 —— 服务端硬拦截，不只是隐藏按钮；
+  //   2. 拦截发生在校验前，因此缺失字段也返回停用提示而非字段报错；
+  //   3. 拦截只针对 store_remediation，不影响仍在流转的盘点申请。
+  const blocked = await request('POST', '/api/v2/workflows', {
     type: 'store_remediation', title: 'Isolated remediation check',
     form: { storeName: 'Test location', issue: 'Broken safety sign', dueDate: '2026-12-31' },
   }, admin);
-  assert.equal(created.status, 201, JSON.stringify(created.data));
-  const id = created.data.item.id;
-  assert.equal(created.data.item.assigneeId, null);
-  const adminList = await request('GET', '/api/v2/workflows', null, admin);
-  assert.equal(adminList.status, 200);
-  assert.equal(adminList.data.items.some(item => item.id === id), true, 'administrator can see a newly submitted request');
-  assert.equal(adminList.data.pendingForMe, 1, 'administrator can approve the manager request, but not their own request');
-  assert.equal(adminList.data.items.find(item => item.id === id).actionableForMe, false, 'own request has no approval action');
-  assert.equal(adminList.data.items.find(item => item.id === managerStocktake.data.item.id).actionableForMe, true);
-  const adminActionable = await request('GET', '/api/v2/workflows?actionable=1', null, admin);
-  assert.equal(adminActionable.status, 200);
-  assert.equal(adminActionable.data.total, 1, 'actionable filter excludes the administrator’s own request');
-  assert.equal(adminActionable.data.items[0].id, managerStocktake.data.item.id);
-  const reviewerList = await request('GET', '/api/v2/workflows', null, reviewer.cookie);
-  assert.equal(reviewerList.status, 200);
-  assert.equal(reviewerList.data.items.some(item => item.id === id), true, 'Philippines reviewer can see a request in scope');
-  assert.equal(reviewerList.data.pendingForMe, 2, 'reviewer has two actionable requests');
-  const reviewerActionable = await request('GET', '/api/v2/workflows?actionable=1&limit=1', null, reviewer.cookie);
-  assert.equal(reviewerActionable.data.total, 2, 'actionable filter count precedes pagination');
-  assert.equal(reviewerActionable.data.items.length, 1);
-  assert.equal(reviewerActionable.data.items[0].actionableForMe, true);
-  const unassignedSalesList = await request('GET', '/api/v2/workflows', null, salesA.cookie);
-  assert.equal(unassignedSalesList.status, 200);
-  assert.equal(unassignedSalesList.data.items.some(item => item.id === id), false, 'unassigned store user cannot see a freeform remediation request');
-  assert.equal(unassignedSalesList.data.pendingForMe, 0, 'frontline user has no approval permission');
-  const approved = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'approve' }, reviewer.cookie);
-  assert.equal(approved.status, 200, JSON.stringify(approved.data));
-  assert.equal(approved.data.item.status, 'approved');
-  const unassignedExecution = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'execution', executionStatus: 'completed' }, admin);
-  assert.equal(unassignedExecution.status, 409);
+  assert.equal(blocked.status, 400, 'store remediation creation must be blocked');
+  assert.match(String(blocked.data?.error || ''), /停用新建/, 'returns an explicit "creation disabled" message');
+  const blockedIncomplete = await request('POST', '/api/v2/workflows', {
+    type: 'store_remediation', title: 'Missing fields', form: {},
+  }, admin);
+  assert.equal(blockedIncomplete.status, 400);
+  assert.match(String(blockedIncomplete.data?.error || ''), /停用新建/, 'disabled check precedes field validation');
+  const blockedForManager = await request('POST', '/api/v2/workflows', {
+    type: 'store_remediation', title: 'Manager attempt', form: { storeName: 'X', issue: 'Y', dueDate: '2026-12-31' },
+  }, managerCookie);
+  assert.equal(blockedForManager.status, 400, 'blocked for store managers too, not only administrators');
+  const noRemediation = await request('GET', '/api/v2/workflows', null, admin);
+  assert.equal(noRemediation.data.items.some(item => item.type === 'store_remediation'), false, 'no remediation request was created');
 
-  const candidates = await request('GET', `/api/v2/workflows/${id}/assignees`, null, reviewer.cookie);
-  assert.equal(candidates.status, 200);
-  assert.equal(candidates.data.items.some(item => item.id === salesA.id), true);
-  const assigned = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'assign', assigneeId: salesA.id }, reviewer.cookie);
-  assert.equal(assigned.status, 200, JSON.stringify(assigned.data));
-  assert.equal(assigned.data.item.assigneeId, salesA.id);
-  assert.equal(assigned.data.item.executionRound, 1);
-  const visible = await request('GET', '/api/v2/workflows', null, salesA.cookie);
-  assert.equal(visible.status, 200);
-  assert.equal(visible.data.items.some(item => item.id === id), true);
-  const upload = async (cookie, evidenceType) => request('POST', `/api/v2/workflows/${id}/attachments`, { fileName: `${evidenceType}.png`, mimeType: 'image/png', data: tinyPng, evidenceType }, cookie);
-  assert.equal((await upload(salesA.cookie, 'before')).status, 201);
-  assert.equal((await upload(salesA.cookie, 'after')).status, 201);
+  // 盘点申请不受影响：仍可正常新建并出现在列表中
+  // （盘点要求 1–2,000 行明细或上传 Excel，故给一条明细，不能用空 items）
+  const stocktakeStillWorks = await request('POST', '/api/v2/workflows', {
+    type: 'stocktake', title: 'Stocktake still accepted',
+    form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'regression', items: [{ itemCode: 'REGRESSION-001', countedQuantity: 0 }] },
+  }, admin);
+  assert.equal(stocktakeStillWorks.status, 201, JSON.stringify(stocktakeStillWorks.data));
+  const afterBlockList = await request('GET', '/api/v2/workflows', null, admin);
+  assert.equal(afterBlockList.data.items.some(item => item.id === stocktakeStillWorks.data.item.id), true, 'stocktake remains visible in the list');
 
-  const reassigned = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'assign', assigneeId: salesB.id }, reviewer.cookie);
-  assert.equal(reassigned.status, 200, JSON.stringify(reassigned.data));
-  assert.equal(reassigned.data.item.executionRound, 2);
-  const formerAssigneeList = await request('GET', '/api/v2/workflows', null, salesA.cookie);
-  assert.equal(formerAssigneeList.data.items.some(item => item.id === id), false, 'former assignee loses list visibility');
-  assert.equal((await upload(salesA.cookie, 'before')).status, 403);
-  const staleEvidence = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'execution', executionStatus: 'completed' }, salesB.cookie);
-  assert.equal(staleEvidence.status, 409);
-  assert.equal((await upload(salesB.cookie, 'before')).status, 201);
-  assert.equal((await upload(salesB.cookie, 'after')).status, 201);
-  const executed = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'execution', executionStatus: 'completed' }, salesB.cookie);
-  assert.equal(executed.status, 200, JSON.stringify(executed.data));
-  assert.equal(executed.data.item.status, 'awaiting_review');
-  const reviewed = await request('POST', `/api/v2/workflows/${id}/actions`, { action: 'review_pass' }, reviewer.cookie);
-  assert.equal(reviewed.status, 200, JSON.stringify(reviewed.data));
-  assert.equal(reviewed.data.item.status, 'completed');
+  // 巡检转整改同样走 POST /api/v2/workflows（type=store_remediation），
+  // 因此上面的服务端拦截已一并覆盖，无需重复断言。
 
   const XLSX = require('../public/xlsx.full.min.js');
   const workbook = XLSX.utils.book_new();

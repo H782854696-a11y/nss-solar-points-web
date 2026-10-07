@@ -2262,6 +2262,9 @@ app.post('/api/v2/workflows', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'workflow.create')) return;
   const b = req.body || {}, type = String(b.type || '');
+  // 2026-10-07：门店整改已停用新建（前端三个入口一并移除）。
+  // 服务端同步拦截，防止绕过界面直接调 API 建单；存量申请不受影响，仍可审批/整改/关闭。
+  if (type === 'store_remediation') return res.status(400).json({ error: '门店整改流程已停用新建，如有需要请联系集团管理员' });
   if (b.sourceFile && type !== 'stocktake') return res.status(400).json({ error: '只有盘点申请可以直接附加表格' });
   const sourceResult = b.sourceFile ? parseStocktakeSourceFile(b.sourceFile) : null;
   if (sourceResult?.error) return res.status(400).json({ error: sourceResult.error });

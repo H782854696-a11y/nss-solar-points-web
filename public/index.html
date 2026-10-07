@@ -58,6 +58,8 @@
         <img src="/logo-brand.png" alt="NSS Solar" class="brand-logo" />
         <span class="logo-subtitle" data-i18n="brand.subtitle">集团运营中心</span>
       </div>
+      <!-- 公告置顶（2026-10-07）：全员公告是最高频入口，放在所有工作区之前 -->
+      <div class="nav-item" data-screen="controlCenter" data-workspace="announcements"><span data-i18n="nav.workspaceAnnouncements">内容公告</span><span class="nav-count nav-count-neutral" id="navAnnouncementCount" hidden></span></div>
       <div class="nav-item nav-item-primary" data-screen="controlCenter">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 5.5h16v13H4zM8 9h8M8 12h5M8 15h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
         <span data-i18n="nav.controlCenter">中控平台</span>
@@ -72,7 +74,6 @@
           <span data-i18n="nav.stores">门店管理</span>
         </div>
         <div class="nav-item" data-screen="controlCenter" data-workspace="storeops"><span data-i18n="nav.workspaceStoreOps">门店跟进</span></div>
-        <div class="nav-item" data-screen="controlCenter" data-workspace="announcements"><span data-i18n="nav.workspaceAnnouncements">内容公告</span><span class="nav-count nav-count-neutral" id="navAnnouncementCount" hidden></span></div>
       </div>
       <div class="nav-group nav-group-system">
         <div class="nav-group-label" data-i18n="nav.groupSystemAudit">系统与审计</div>
@@ -128,7 +129,7 @@
   <div id="modalRoot" class="modal-root hidden"></div>
 
 <script src="/i18n.js?v=31"></script>
-  <script src="/app.js?v=68"></script>
+  <script src="/app.js?v=69"></script>
   <script>if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js').catch(() => {}));</script>
 </body>
 </html>
