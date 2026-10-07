@@ -104,17 +104,20 @@ button, input, select, textarea { font-family: inherit; }
   overflow-y: auto;
   background: #0E1F1A;
 }
-/* 全屏摄影背景：cover、不拉伸变形 */
+/* 全屏摄影背景：cover、不拉伸变形。v=2 锁定 2026-10-07 换的明亮版 */
 .login-bg {
   position: absolute; inset: 0; z-index: 0;
-  background: url('/login-bg.jpg') center 42% / cover no-repeat;
+  background: url('/login-bg.jpg?v=2') center 42% / cover no-repeat;
 }
-/* 整体 30% 深色蒙层 + 中央轻微径向暗部（把 UI 区域从照片里"托"出来，不改变照片气质） */
+/* 明亮背景图（2026-10-07 换）配平调蒙层。
+   背景换成蓝天白云的高调照片后，若沿用旧的 30% 深色蒙层会把画面重新压暗；
+   但蒙层也不能太轻 —— 标题、logo 与副标题都是白字，亮背景上会看不清。
+   故改为「中央暗部加强 + 整体层减淡」：UI 区仍可读，四周保持明亮开阔。 */
 .login-shade {
   position: absolute; inset: 0; z-index: 1;
   background:
-    radial-gradient(ellipse 62% 78% at 50% 52%, rgba(5,14,11,.34) 0%, rgba(5,14,11,.12) 55%, transparent 100%),
-    linear-gradient(rgba(8,18,14,.30), rgba(8,18,14,.30));
+    radial-gradient(ellipse 58% 72% at 50% 50%, rgba(6,20,30,.46) 0%, rgba(6,20,30,.16) 60%, transparent 100%),
+    linear-gradient(rgba(20,40,55,.16), rgba(20,40,55,.16));
 }
 /* 中央轴线容器：品牌 + 标题 + 面板共用一条垂直中轴 */
 .login-center {
@@ -224,6 +227,12 @@ button, input, select, textarea { font-family: inherit; }
   /* iOS Safari 聚焦输入框时，若字号 <16px 会自动放大整个页面导致布局错位。
      手机上统一抬到 16px（桌面保持 14px 不变）。 */
   .login-panel input { font-size: 16px; }
+  /* 竖屏内容集中在上半部，中央暗部随之��移并收窄，避免底部大片空地发闷 */
+  .login-shade {
+    background:
+      radial-gradient(ellipse 78% 52% at 50% 44%, rgba(6,20,30,.44) 0%, rgba(6,20,30,.12) 62%, transparent 100%),
+      linear-gradient(rgba(20,40,55,.14), rgba(20,40,55,.14));
+  }
 }
 
 /* =================== App Shell =================== */
