@@ -117,15 +117,15 @@ function runSuite(driver) {
   const backIds = store.readCollection('members').map(m => m.id);
   eq('读回顺序与写入顺序完全一致', backIds, shuffled.map(m => m.id));
 
-  // T5 单例集合
+  // T5 单例集合（2026-10-08：rules 已从 SCHEMAS 移除，探针改用 _seeded —— 唯一保留的 singleton）
   L('T5 单例集合');
-  eq('未写入的单例集合读回 null', store.readCollection('rules'), null);
-  const rules = { spendPerPoint: 10, welcomeBonus: 500, levels: [{ key: 'silver', threshold: 0 }] };
-  store.writeCollection('rules', rules);
-  ok('单例写入后读回一致', deepEq(store.readCollection('rules'), rules));
-  const rules2 = Object.assign({}, rules, { spendPerPoint: 20 });
-  store.writeCollection('rules', rules2);
-  eq('单例覆盖写入生效', store.readCollection('rules').spendPerPoint, 20);
+  eq('未写入的单例集合读回 null', store.readCollection('_seeded'), null);
+  const singletonFixture = { marker: 't5', spendPerPoint: 10, levels: [{ key: 'silver', threshold: 0 }] };
+  store.writeCollection('_seeded', singletonFixture);
+  ok('单例写入后读回一致', deepEq(store.readCollection('_seeded'), singletonFixture));
+  const singletonFixture2 = Object.assign({}, singletonFixture, { spendPerPoint: 20 });
+  store.writeCollection('_seeded', singletonFixture2);
+  eq('单例覆盖写入生效', store.readCollection('_seeded').spendPerPoint, 20);
 
   // T6 空集合
   L('T6 空集合');
@@ -135,7 +135,9 @@ function runSuite(driver) {
   // T7 缺失集合
   L('T7 缺失集合');
   ok('未写过的已声明数组集合读回 []', deepEq(store.readCollection('redemptions'), []));
-  ok('未写过的已声明单例集合读回 null', store.readCollection('expiry-state') === null);
+  // 2026-10-08：expiry-state 已随积分系统退役。「未写入的单例读回 null」语义
+  // 由 T5 第一条断言覆盖（两个驱动各跑一遍、均为全新环境），此处不再重复 —
+  // SQLite 模式下无法通过删 JSON 文件制造「未写入」状态，重复断言只会误报。
   ok('未注册的集合名读回 [] 且不报错', deepEq(store.readCollection('not_declared_anywhere'), []));
 
   // T8 多次读写一致性
@@ -248,21 +250,23 @@ function runMigrationSuite() {
   resetEnv('json');
 
   // M1 两个驱动对同一份数据结果必须完全等价
+  // 2026-10-08 审计 M-2：rules 已随积分系统从 SCHEMAS 移除，单例探针改用 _seeded
+  //（SCHEMAS 中唯一保留的 singleton 集合，JSON / SQLite 两个驱动语义一致）。
   const fixtureMembers = [makeMember(1), makeMember(2), makeMember(3)];
-  const fixtureRules = { spendPerPoint: 10, welcomeBonus: 500, levels: [{ key: 'silver', threshold: 0 }], b2bTiers: [] };
+  const fixtureSingleton = { marker: 'singleton-fixture', n: 42 };
   store.writeCollection('members', fixtureMembers);
-  store.writeCollection('rules', fixtureRules);
+  store.writeCollection('_seeded', fixtureSingleton);
   const jsonMembers = store.readCollection('members');
-  const jsonRules = store.readCollection('rules');
+  const jsonSingleton = store.readCollection('_seeded');
 
   fs.writeFileSync(MARKER, JSON.stringify({ driver: 'sqlite' }));
   db.close(); store.resetDriverCache(); db.ensureTables();
   store.writeCollection('members', fixtureMembers);
-  store.writeCollection('rules', fixtureRules);
+  store.writeCollection('_seeded', fixtureSingleton);
   const sqliteMembers = store.readCollection('members');
-  const sqliteRules = store.readCollection('rules');
+  const sqliteSingleton = store.readCollection('_seeded');
   ok('数组集合：SQLite 读回与 JSON 读回深度一致', deepEq(jsonMembers, sqliteMembers));
-  ok('单例集合：SQLite 读回与 JSON 读回深度一致', deepEq(jsonRules, sqliteRules));
+  ok('单例集合：SQLite 读回与 JSON 读回深度一致', deepEq(jsonSingleton, sqliteSingleton));
 
   // M2 损坏 JSON 留档且不覆盖（JSON 驱动行为）
   resetEnv('json');

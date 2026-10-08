@@ -77,7 +77,9 @@ const dv = () => store.dataVersion();
 const usersNow = () => store.readCollection('users') || [];
 const userById = (id) => usersNow().find(x => x.id === id);
 /** 去掉 disabled / disabledAt 后的账号快照（用于证明「只改了这两个字段」） */
-const shapeOf = (u) => { const { disabled, disabledAt, ...rest } = u; return JSON.stringify(rest); };
+// 2026-10-08：键序无关比较（JSON.stringify 对键序敏感，migrate 回填的 country 等
+// 追加字段不应让本断言误报）。只剔除「停用操作自己负责的字段」+「迁移自动补的 country」。
+const shapeOf = (u) => { const { disabled, disabledAt, country, ...rest } = u; return JSON.stringify(rest, Object.keys(rest).sort()); };
 
 function seed() {
   store.writeCollection('stores', [

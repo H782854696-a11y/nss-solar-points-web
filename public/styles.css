@@ -250,6 +250,26 @@ button, input, select, textarea { font-family: inherit; }
 .cc-purchase-overdue { color: #b42318; font-weight: 600; }
 .cc-purchase-files { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .cc-purchase-card { border-left: 3px solid var(--brand); }
+/* ── 工作区统计条 + 账号管理操作按钮（2026-10-08 审计 M-2 补齐缺失样式）──
+   app.js 大量使用但 styles.css 从未定义：cc-workspace-stats / cc-detail-stat /
+   cc-tone-* / cc-icon-action / cc-positive / cc-warning / cc-danger。 */
+.cc-workspace-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; }
+.cc-detail-stat { display: flex; flex-direction: column; gap: 2px; min-width: 130px; padding: 10px 14px; border: 1px solid var(--line); border-radius: 10px; background: #fbfdfc; }
+.cc-detail-stat span { font-size: 11px; color: var(--muted); }
+.cc-detail-stat strong { font-size: 20px; line-height: 1.15; color: var(--ink); }
+.cc-detail-stat small { font-size: 11px; color: var(--muted); }
+.cc-detail-stat.is-zero strong { color: var(--muted); }
+.cc-detail-stat.is-error { border-color: #f0c4c0; background: #fdf1f0; }
+.cc-detail-stat.is-error strong { color: #b42318; }
+.cc-tone-brand strong { color: var(--brand); }
+.cc-tone-success strong { color: #127a43; }
+.cc-tone-warning strong { color: #92610a; }
+.cc-tone-danger strong { color: #b42318; }
+.cc-tone-neutral strong { color: var(--muted); }
+.cc-icon-action { padding: 4px 8px; font-size: 12px; line-height: 1; }
+.cc-positive { color: #127a43; background: #f2fbf5; border-color: #bfe6cf; }
+.cc-warning { color: #92610a; background: #fdf7e7; border-color: #ecd9a8; }
+.cc-danger { color: #b42318; background: #fdf1f0; border-color: #f0c4c0; }
 /* 新增批次表单默认折叠：采购员日常是「看进度」而不是「填表」，
    表单展开时占位 731px，比批次列表还高，会把要看的记录挤到屏幕外。 */
 .cc-purchase-new { margin: 10px 0 4px; border: 1px dashed #cfe3d7; border-radius: 10px; background: #fbfdfc; }

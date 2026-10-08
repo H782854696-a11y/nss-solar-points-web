@@ -151,8 +151,9 @@ const body = (u, n) => ({ username: u, name: n, password: 'Brand#New123' });
   ok('★ 没有创建出新账号 brand_new_mgr', !usersNow().some(x => x.username === 'brand_new_mgr'));
   ok('★ users 总数未变（7 个）', usersNow().length === 7, usersNow().length);
   ok('★ dataVersion 未变化（被拒绝的请求不落库）', dv() === dv1, { before: dv1, after: dv() });
-  r = await req('GET', '/api/members');
-  ok('★ mgr1 的会话仍然有效（GET /api/members → 200），没有被踢出',
+  // 2026-10-08 审计 M-2：/api/members 随积分系统退役（410），改用 /api/auth/me 探测会话有效性
+  r = await req('GET', '/api/auth/me');
+  ok('★ mgr1 的会话仍然有效（GET /api/auth/me → 200），没有被踢出',
     r.status === 200, r.status);
 
   console.log('\n【2】★ 核心：店长不能通过「解绑」流程把自己停用');
