@@ -1,0 +1,4 @@
+{
+  "dataCompatibility": "daily-deposit-review-v1",
+  "description": "Supports reported, pending_review, rejected, and confirmed daily-deposit states."
+}
