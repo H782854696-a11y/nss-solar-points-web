@@ -1888,6 +1888,13 @@ app.get('/api/v2/purchase-shipments', (req, res) => {
     total, offset, limit, countsByStage,
     stages: PURCHASE_STAGES,
     inTransitTotal: all.filter(x => ['ordered','preparing','loaded','in_transit'].includes(x.stage)).length,
+    // 跟单仪表盘（2026-10-08）：7 天内预计到达 —— 按**全量**统计（列表只是一页），
+    // 口径：填了 ETA、尚未入库、且 ETA 落在今天至 +7 天之间（含今天）。
+    etaSoonTotal: (() => {
+      const today = nowIso().slice(0, 10);
+      const soon = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      return all.filter(x => x.eta && x.stage !== 'warehoused' && !x.arrivalDate && x.eta >= today && x.eta <= soon).length;
+    })(),
   });
 });
 app.post('/api/v2/purchase-shipments', (req, res) => {

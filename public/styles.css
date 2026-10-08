@@ -266,10 +266,20 @@ button, input, select, textarea { font-family: inherit; }
 .cc-tone-warning strong { color: #92610a; }
 .cc-tone-danger strong { color: #b42318; }
 .cc-tone-neutral strong { color: var(--muted); }
-.cc-icon-action { padding: 4px 8px; font-size: 12px; line-height: 1; }
+/* ⚠️ flex:0 0 auto 必须有：按钮作为操作列的 flex 子项时，默认 flex-shrink:1
+   会被压缩到 31px，文字溢出与相邻按钮重叠（2026-10-08 实测踩坑）。 */
+.cc-icon-action { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 5px; padding: 4px 10px; font-size: 12px; line-height: 1; white-space: nowrap; }
+.cc-icon-action > span[aria-hidden] { font-size: 12px; opacity: .85; }
+/* 账号表格的操作按钮组：不换行、允许横向滚动兜底，避免窄屏挤压重叠 */
+.tx-row > span:last-child { flex-wrap: nowrap; white-space: nowrap; }
 .cc-positive { color: #127a43; background: #f2fbf5; border-color: #bfe6cf; }
 .cc-warning { color: #92610a; background: #fdf7e7; border-color: #ecd9a8; }
 .cc-danger { color: #b42318; background: #fdf1f0; border-color: #f0c4c0; }
+/* 组织架构工作区（2026-10-08）：组织 / 区域卡片网格 */
+.cc-org-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.cc-org-card { padding: 14px 16px; }
+.cc-org-card .cc-card-top { align-items: center; }
+.cc-org-card .cc-status-cn { background: #fdf1f0; color: #b42318; }
 /* 新增批次表单默认折叠：采购员日常是「看进度」而不是「填表」，
    表单展开时占位 731px，比批次列表还高，会把要看的记录挤到屏幕外。 */
 .cc-purchase-new { margin: 10px 0 4px; border: 1px dashed #cfe3d7; border-radius: 10px; background: #fbfdfc; }

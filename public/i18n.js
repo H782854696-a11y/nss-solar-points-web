@@ -86,6 +86,7 @@
        侧栏必须随语言切换，否则会出现「英文界面 + 中文菜单」。*/
     'brand.subtitle': ['Group Operations', '集团运营中心'],
     'nav.groupDailyOps': ['DAILY OPERATIONS', '日常运营'],
+  'nav.organization': ['Organization', '组织架构'],
     'nav.groupSystemAudit': ['SYSTEM & AUDIT', '系统与审计'],
     'nav.workspaceApprovals': ['Approval Center', '审批中心'],
     'nav.workspaceTasks': ['Tasks & Collab', '任务协作'],
@@ -247,7 +248,7 @@
     'role.service': ['Service', '售后/技术'],
   'role.purchaser': ['Purchasing', '采购员'],
   // 采购跟单工作区（2026-10-07 新增）
-  'nav.workspacePurchasing': ['Purchasing', '采购跟单'],
+  'nav.workspacePurchasing': ['Shipment dashboard', '跟单仪表盘'],
   'purchase.stage.ordered': ['Order placed', '已下单'],
   'purchase.stage.preparing': ['Preparing / QC', '备货验货'],
   'purchase.stage.loaded': ['Loaded on vessel', '已开船'],
@@ -255,6 +256,12 @@
   'purchase.stage.arrived': ['Arrived at port', '已到港'],
   'purchase.stage.customs': ['Clearing customs', '清关中'],
   'purchase.stage.warehoused': ['Warehoused', '已入库'],
+  // 跟单仪表盘：4 个汇总状态（把 7 个物流阶段归并为跟单员视角的 4 档）
+  'purchase.bucket.pending': ['Awaiting delivery', '待交货'],
+  'purchase.bucket.delivered': ['Delivered', '已交货'],
+  'purchase.bucket.inTransit': ['In transit', '运输中'],
+  'purchase.bucket.arrived': ['Arrived', '已到达'],
+  'purchase.bucket.etaSoon': ['Arriving within 7 days', '预计 7 天内到达'],
     'header.searchPh': ['Search stores, tasks and workflows', '搜索门店 / 任务 / 流程'],
     'header.logout': ['Sign out', '退出登录'],
 
@@ -737,6 +744,7 @@
     'accounts.disabled': ['Account disabled', '账号已停用'],
     'accounts.deleted': ['Account removed', '账号已删除'],
     'accounts.resetPw': ['Reset password', '重置密码'],
+    'accounts.resetPwShort': ['Reset', '重置'],
     'accounts.resetPwTitle': ['Reset password', '重置密码'],
     'accounts.resetPwBody': ['Set a temporary password for {username} ({name}). The account is signed out immediately and must change this password after signing in.', '为 {username}（{name}）设置临时密码。重置后该账号会被立即登出，下次登录后必须更改此密码。'],
     'accounts.resetPwLabel': ['New password (at least 6 characters)', '新密码（至少 6 位）'],

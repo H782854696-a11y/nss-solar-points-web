@@ -148,6 +148,18 @@ test('purchaser role, shipping stage machine and stock are correctly scoped', { 
   assert.equal(warehoused.data.total, 1, 'stage filter narrows the list');
   assert.equal(warehoused.data.countsByStage.warehoused, 1);
   assert.equal(warehoused.data.inTransitTotal, 0, 'warehoused batches are no longer in transit');
+
+  // ── 跟单仪表盘：7 天内预计到达（2026-10-08 新增字段，按全量统计）──
+  const isoDay = offset => new Date(Date.now() + offset * 86400000).toISOString().slice(0, 10);
+  const soon = await raw('POST', '/api/v2/purchase-shipments', { orderNo: 'PO-SOON-1', supplier: '晶科能源', stage: 'in_transit', eta: isoDay(3) }, buyerCookie);
+  assert.equal(soon.status, 201, JSON.stringify(soon.data));
+  const soonList = await raw('GET', '/api/v2/purchase-shipments', null, buyerCookie);
+  assert.equal(soonList.data.etaSoonTotal, 1, 'ETA within 7 days counts toward the dashboard');
+  // 已入库/已到港的不计入；超出 7 天窗口的不计入
+  const far = await raw('POST', '/api/v2/purchase-shipments', { orderNo: 'PO-FAR-1', supplier: '晶科能源', stage: 'in_transit', eta: isoDay(30) }, buyerCookie);
+  assert.equal(far.status, 201);
+  const afterFar = await raw('GET', '/api/v2/purchase-shipments', null, buyerCookie);
+  assert.equal(afterFar.data.etaSoonTotal, 1, 'ETA beyond 7 days is excluded');
   const bySupplier = await raw('GET', '/api/v2/purchase-shipments?q=' + encodeURIComponent('隆基'), null, buyerCookie);
   assert.equal(bySupplier.data.total, 1, 'free-text search matches supplier');
   assert.equal((await raw('GET', '/api/v2/purchase-shipments?q=nothing-here', null, buyerCookie)).data.total, 0, 'search excludes non-matches');
