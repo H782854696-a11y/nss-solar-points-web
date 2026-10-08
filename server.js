@@ -120,6 +120,18 @@ guard.configureRegionResolver(() => {
 app.use(express.json({ limit: '15mb' }));
 app.use(cookieParser());
 
+// Deployment validation may run a candidate against the live data directory
+// before it is allowed to serve business traffic.  During that short phase the
+// process is strictly read-only: health and static GET requests work, while
+// every state-changing request fails closed.  This flag is only set by the
+// deployment script; normal application operation is unchanged.
+if (process.env.SP_DEPLOY_READ_ONLY === '1') {
+  app.use((req, res, next) => {
+    if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    return res.status(503).json({ error: '部署验证中，暂时不接受数据修改' });
+  });
+}
+
 // ── 安全响应头（2026-10-08 审计 M-3）──
 // 点击劫持、MIME 嗅探、XSS 的纵深防御。附件下载处已单独加 nosniff，这里统一兜底。
 // CSP 说明：前端是原生 SPA + 内联 <style>/事件绑定，故 style-src 需 'unsafe-inline'；
@@ -2424,5 +2436,5 @@ app.listen(PORT, () => {
   if (process.env.SP_ADMIN_PASSWORD) console.log('New administrator bootstrap is using SP_ADMIN_PASSWORD; first login will require a password change.');
   else console.log(`For a new data directory, read ${path.join(store.DATA_DIR, 'INITIAL_ADMIN_CREDENTIALS.txt')} and remove it after completing the forced password change.`);
   // 启动任务与门店整改逾期提醒（每 15 分钟）
-  controlReminders.start();
+  if (process.env.SP_DISABLE_BACKGROUND_JOBS !== '1') controlReminders.start();
 });
