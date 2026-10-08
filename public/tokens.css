@@ -1,39 +1,48 @@
-/* NSS Solar control platform design tokens. Login screen keeps its existing branding. */
+/* NSS Solar control platform design tokens. Login screen keeps its existing branding.
+   2026-10-08 全站「审批聚焦」改造：侧栏改深炭灰，主色统一为蓝 #2563EB，
+   绿色退为「通过/完成」状态色。 */
 .app-shell {
-  --brand: #1D4ED8;
-  --brand-dark: #1E40AF;
-  --brand-bright: #2563EB;
-  --tint-50: #EFF6FF;
+  --brand: #2563EB;
+  --brand-dark: #1D4ED8;
+  --brand-bright: #3B82F6;
+  --brand-soft: #EFF4FF;
+  --brand-line: #C7D9FE;
+  --tint-50: #EFF4FF;
   --tint-100: #DBEAFE;
   --tint-200: #BFDBFE;
-  --ok-bg: #DCFCEB;
-  --ok-ink: #0B7D56;
-  --warn-bg: #FFF4DB;
-  --warn-ink: #9A5900;
-  --danger-bg: #FEE8E8;
-  --danger-ink: #B4232A;
-  --ink: #182334;
-  --body: #374151;
-  --muted: #4B5563;
-  --subtle: #6B7280;
-  --bg: #F4F7FB;
+  --ok-bg: #E6F6F0;
+  --ok-ink: #0E9F6E;
+  --warn-bg: #FDF3E3;
+  --warn-ink: #B4690E;
+  --danger-bg: #FDECEC;
+  --danger-ink: #D33A3A;
+  --neutral-bg: #F1F2F4;
+  --neutral-ink: #6B7280;
+  --ink: #14181D;
+  --body: #3D464F;
+  --muted: #5C6873;
+  --subtle: #8A939C;
+  --bg: #F5F6F8;
   --surface: #FFFFFF;
-  --line: #E1E7EF;
-  --line-soft: #F0F4F9;
-  --nav-bg: #0B2244;
-  --nav-text: #DCE8F8;
-  --nav-muted: #9FB5CF;
-  --nav-line: #244368;
-  --nav-hover: #183B68;
-  --nav-accent: #7CB2FF;
-  --radius-card: 14px;
-  --radius-ctl: 10px;
-  --shadow-card-rest: 0 1px 3px rgba(17, 34, 61, .06);
+  --line: #E4E7EB;
+  --line-soft: #EEF1F4;
+  /* 侧栏：深炭灰 */
+  --nav-bg: #1B1F24;
+  --nav-text: #C9D1D9;
+  --nav-muted: #868E96;
+  --nav-dim2: #5F676E;
+  --nav-line: #2C3238;
+  --nav-hover: #23282E;
+  --nav-active: #2A3138;
+  --nav-accent: #5B9DF9;
+  --radius-card: 12px;
+  --radius-ctl: 8px;
+  --shadow-card-rest: 0 1px 2px rgba(16, 24, 40, .04);
 }
 
 .app-shell[data-theme="dark"] {
-  --brand: #82B1FF;
-  --brand-dark: #A3C6FF;
+  --brand: #3B82F6;
+  --brand-dark: #60A5FA;
   --tint-50: #142C4C;
   --tint-100: #1C3B63;
   --tint-200: #315A89;
@@ -41,13 +50,13 @@
   --body: #D1DCEC;
   --muted: #AEBED2;
   --subtle: #93A8C2;
-  --bg: #0A1728;
-  --surface: #112239;
+  --bg: #0A121A;
+  --surface: #141B22;
   --line: #2D4663;
   --line-soft: #1A304A;
-  --nav-bg: #071629;
-  --nav-text: #DCE8F8;
-  --nav-hover: #183B68;
+  --nav-bg: #14171A;
+  --nav-text: #C9D1D9;
+  --nav-hover: #1E2328;
   --ok-bg: #103B2E;
   --ok-ink: #7EDBB6;
   --warn-bg: #493417;

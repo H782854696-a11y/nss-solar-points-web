@@ -11,9 +11,9 @@
   <link rel="icon" type="image/svg+xml" href="/pwa-icon.svg" />
   <link rel="manifest" href="/manifest.webmanifest" />
 <title data-i18n="nav.titleAttr">NSS Solar · 中控平台</title>
-  <link rel="stylesheet" href="/styles.css?v=50" />
+  <link rel="stylesheet" href="/styles.css?v=45" />
   <link rel="stylesheet" href="/tokens.css?v=1" />
-  <link rel="stylesheet" href="/ui-review.css?v=8" />
+  <link rel="stylesheet" href="/ui-review.css?v=7" />
 </head>
 <body>
   <!-- ============ 登录页 / Login（2026-09-25 摄影背景重构：全屏光伏电站 + 左品牌组 + 右玻璃登录卡） ============ -->
@@ -55,7 +55,7 @@
   <div id="appShell" class="app-shell hidden">
     <aside class="sidebar">
       <div class="logo-row">
-        <img src="/logo-brand.png" alt="NSS Solar" class="brand-logo" />
+        <img src="/logo-white.png" alt="NSS Solar" class="brand-logo" />
       </div>
       <div class="nav-item nav-item-primary" data-screen="controlCenter">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 5.5h16v13H4zM8 9h8M8 12h5M8 15h3" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -69,20 +69,20 @@
       </div>
       <div class="nav-group">
         <div class="nav-group-label" data-i18n="nav.groupDailyOps">日常运营</div>
-        <div class="nav-item" data-screen="controlCenter" data-workspace="approvals"><span data-i18n="nav.workspaceApprovals">审批中心</span><span class="nav-count" id="navApprovalCount" hidden></span></div>
-        <div class="nav-item" data-screen="controlCenter" data-workspace="collaboration"><span data-i18n="nav.workspaceTasks">任务协作</span><span class="nav-count" id="navTaskCount" hidden></span></div>
+        <div class="nav-item" data-screen="controlCenter" data-workspace="approvals"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M9 11l3 3 8-8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span data-i18n="nav.workspaceApprovals">审批中心</span><span class="nav-count" id="navApprovalCount" hidden></span></div>
+        <div class="nav-item" data-screen="controlCenter" data-workspace="collaboration"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><rect x="3" y="4.5" width="18" height="16" rx="2.5" stroke="currentColor" stroke-width="1.8"/><path d="M8 2.5v4M16 2.5v4M3 10h18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span data-i18n="nav.workspaceTasks">任务协作</span><span class="nav-count" id="navTaskCount" hidden></span></div>
         <div class="nav-item" data-screen="dailyDeposits"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M3.5 9.5 12 5l8.5 4.5M5.5 10.5v7M9.8 10.5v7M14.2 10.5v7M18.5 10.5v7M3.5 19.5h17" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="nav.dailyDeposits">当日存款</span></div>
         <div class="nav-item" data-screen="stores">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4.5 9l1.2-4.5h12.6L19.5 9" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M5 9v9.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9" stroke="currentColor" stroke-width="1.8"/><path d="M5 9c0 1.3 1.1 2.3 2.5 2.3S10 10.3 10 9c0 1.3 1.1 2.3 2.5 2.3S15 10.3 15 9c0 1.3 1.1 2.3 2.5 2.3S20 10.3 20 9" stroke="currentColor" stroke-width="1.8"/><path d="M10 19.5v-5h4v5" stroke="currentColor" stroke-width="1.8"/></svg>
           <span data-i18n="nav.stores">门店管理</span>
         </div>
-        <div class="nav-item" data-screen="controlCenter" data-workspace="storeops"><span data-i18n="nav.workspaceStoreOps">门店跟进</span></div>
-        <div class="nav-item" data-screen="controlCenter" data-workspace="purchasing"><span data-i18n="nav.workspacePurchasing">采购跟单</span><span class="nav-count" id="navPurchaseCount" hidden></span></div>
-        <div class="nav-item" data-screen="controlCenter" data-workspace="announcements"><span data-i18n="nav.workspaceAnnouncements">内容公告</span><span class="nav-count nav-count-neutral" id="navAnnouncementCount" hidden></span></div>
+        <div class="nav-item" data-screen="controlCenter" data-workspace="storeops"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2.5 12h4l2.5-6.5 3.5 13 2.5-6.5h6" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg><span data-i18n="nav.workspaceStoreOps">门店跟进</span></div>
+        <div class="nav-item" data-screen="controlCenter" data-workspace="purchasing"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M2.5 8h11v9h-11z" stroke="currentColor" stroke-width="1.8"/><path d="M13.5 11h4l3 3v3h-7z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><circle cx="6" cy="18.5" r="1.8" stroke="currentColor" stroke-width="1.6"/><circle cx="17" cy="18.5" r="1.8" stroke="currentColor" stroke-width="1.6"/></svg><span data-i18n="nav.workspacePurchasing">采购跟单</span><span class="nav-count" id="navPurchaseCount" hidden></span></div>
+        <div class="nav-item" data-screen="controlCenter" data-workspace="announcements"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M3.5 10.5v3a1 1 0 0 0 1 1h2.5l5 3.5v-11l-5 3.5H4.5a1 1 0 0 0-1 1z" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/><path d="M16.5 8.5a4.5 4.5 0 0 1 0 7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span data-i18n="nav.workspaceAnnouncements">内容公告</span><span class="nav-count nav-count-neutral" id="navAnnouncementCount" hidden></span></div>
       </div>
       <div class="nav-group nav-group-system">
         <div class="nav-group-label" data-i18n="nav.groupSystemAudit">系统与审计</div>
-        <div class="nav-item" data-screen="controlCenter" data-workspace="governance"><span data-i18n="nav.workspaceGovernance">组织与流程设置</span></div>
+        <div class="nav-item" data-screen="controlCenter" data-workspace="governance"><svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M4 6h16M7 12h10M10 18h4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><span data-i18n="nav.workspaceGovernance">组织与流程设置</span></div>
         <div class="nav-item" data-screen="db">
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><ellipse cx="12" cy="6" rx="7" ry="3" stroke="currentColor" stroke-width="1.8"/><path d="M5 6v12c0 1.7 3.1 3 7 3s7-1.3 7-3V6" stroke="currentColor" stroke-width="1.8"/><path d="M5 12c0 1.7 3.1 3 7 3s7-1.3 7-3" stroke="currentColor" stroke-width="1.8"/></svg>
           <span data-i18n="nav.db">数据主库</span>
@@ -133,8 +133,8 @@
 
   <div id="modalRoot" class="modal-root hidden"></div>
 
-<script src="/i18n.js?v=36"></script>
-  <script src="/app.js?v=74"></script>
+<script src="/i18n.js?v=32"></script>
+  <script src="/app.js?v=75"></script>
   <script>if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js').catch(() => {}));</script>
 </body>
 </html>

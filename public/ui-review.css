@@ -347,3 +347,114 @@
 .app-shell .link-btn:hover { color: var(--brand-dark); }
 .app-shell .link-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 3px; }
 .app-shell[data-theme="dark"] .link-btn { color: var(--brand-bright); }
+
+/* ============================================================================
+   2026-10-08 全站「审批聚焦」改造 —— 侧栏炭灰主题覆盖层
+   覆盖前文遗留的深蓝硬编码，保持向后兼容；全部颜色走 tokens.css 变量。
+   ============================================================================ */
+
+/* 侧栏：深炭灰，选中态用中性灰而非蓝色高亮 */
+.app-shell .sidebar { background: var(--nav-bg); }
+.app-shell .nav-group-label { color: var(--nav-dim2); letter-spacing: .11em; }
+.app-shell .nav-item { border-radius: 8px; border-left: 3px solid transparent; }
+.app-shell .nav-item:hover { color: #fff; background: var(--nav-hover); }
+.app-shell .nav-item.active,
+.app-shell .nav-item-primary.active { color: #fff; background: var(--nav-active); border-left-color: var(--nav-accent); }
+.app-shell .nav-item.active svg { color: #fff; }
+.app-shell .nav-item-primary {
+  background: #22272D; border: 1px solid transparent;
+  border-radius: 8px; color: #E6EDF3;
+}
+.app-shell .nav-primary-arrow { color: var(--nav-accent); }
+.app-shell .nav-item-primary.active {
+  border-color: rgba(91,157,249,.35); border-left-color: var(--nav-accent);
+  background: var(--nav-active);
+}
+.app-shell .nav-item:focus-visible,
+.app-shell button:focus-visible,
+.app-shell a:focus-visible { outline-color: var(--nav-accent); }
+.app-shell .nav-count { background: var(--danger-ink); }
+.app-shell .nav-count-neutral { background: #333A41; color: var(--nav-text); }
+.app-shell .user-name { color: #E6EDF3; }
+.app-shell .user-chevron { color: var(--nav-muted); }
+.app-shell .nav-group-system { border-top-color: var(--nav-line); }
+
+/* 侧栏 LOGO：白字版，去掉白块 */
+.app-shell .logo-row { background: transparent; }
+
+/* ============================================================================
+   2026-10-08 首页与全局「审批聚焦」配色统一 —— 绿主色 → 蓝主色
+   公告条、快捷按钮等仍残留「绿色主色」时代配色，统一改为蓝色系。
+   ============================================================================ */
+.app-shell .cc-announcement-ticker {
+  border-color: var(--brand-line); background: var(--brand-soft); color: var(--brand-dark);
+}
+.app-shell .cc-announcement-ticker button { color: var(--brand-dark); }
+.app-shell .cc-quick-actions button {
+  border-color: var(--brand-line); background: var(--brand-soft); color: var(--brand-dark);
+}
+.app-shell .cc-quick-actions button:hover { border-color: var(--brand); background: #E6EFFF; }
+
+/* 首页四宫格卡片：统一左侧状态色描边（替代原先顶部描边的写法差异） */
+.app-shell .cc-overview-card { border-left: 3px solid var(--line); }
+.app-shell .cc-overview-card.cc-tone-warning { border-left-color: var(--warn-ink); }
+.app-shell .cc-overview-card.cc-tone-brand { border-left-color: var(--brand); }
+.app-shell .cc-overview-card.cc-tone-danger { border-left-color: var(--danger-ink); }
+.app-shell .cc-overview-card.cc-tone-success { border-left-color: var(--ok-ink); }
+.app-shell .cc-overview-card.cc-tone-neutral { border-left-color: var(--neutral-ink); }
+.app-shell .cc-overview-card strong { font-variant-numeric: tabular-nums; }
+
+/* 审批状态分布环形图 */
+.app-shell .cc-status-ring { display: flex; align-items: center; gap: 20px; padding: 4px 0; }
+.app-shell .cc-status-ring svg { flex: 0 0 auto; }
+.app-shell .cc-status-legend { flex: 1; display: grid; gap: 8px; font-size: 12.5px; }
+.app-shell .cc-status-legend .lg { display: flex; align-items: center; gap: 9px; }
+.app-shell .cc-status-legend .lg b { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+.app-shell .cc-status-legend .lg span { flex: 1; color: var(--body); }
+.app-shell .cc-status-legend .lg em { font-style: normal; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--ink); }
+.app-shell .cc-ring-source { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--line-soft); font-size: 11.5px; color: var(--subtle); }
+
+@media (max-width: 650px) {
+  .app-shell .cc-status-ring { flex-direction: column; align-items: flex-start; }
+}
+
+/* 2026-10-08 补充：KPI 卡统一「仅左侧 3px 状态色条」，去掉旧的顶部描边。
+   空值(0)也按语义显示完成绿，但整体不抢眼。 */
+.app-shell .cc-overview-card { border-top: 0 !important; }
+
+/* ============================================================================
+   2026-10-08 审批中心「左列表 ＋ 右详情」双栏
+   左栏为精炼行（标题/类型/提交人/状态），右栏保留完整功能卡（审批、备注、
+   附件、明细、历史、全部操作按钮），点击左侧行纯前端切换，不重新请求。
+   ============================================================================ */
+.app-shell .cc-approval-split { display: grid; grid-template-columns: 316px minmax(0, 1fr); gap: 14px; align-items: start; }
+.app-shell .cc-approval-side {
+  background: var(--surface); border: 1px solid var(--line); border-radius: 12px;
+  overflow: hidden; position: sticky; top: 76px;
+  max-height: calc(100vh - 96px); display: flex; flex-direction: column;
+}
+.app-shell .cc-approval-list { overflow-y: auto; }
+.app-shell .cc-approval-row {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 11px 13px; border: 0; border-bottom: 1px solid var(--line-soft);
+  background: transparent; font: inherit; font-family: inherit;
+  text-align: left; cursor: pointer;
+}
+.app-shell .cc-approval-row:last-child { border-bottom: 0; }
+.app-shell .cc-approval-row:hover { background: #FAFBFC; }
+.app-shell .cc-approval-row.on { background: var(--brand-soft); box-shadow: inset 3px 0 0 var(--brand); }
+.app-shell .cc-approval-row-main { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.app-shell .cc-approval-row-main strong {
+  font-size: 12.5px; font-weight: 500; color: var(--ink);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.app-shell .cc-approval-row-main small {
+  font-size: 11.5px; color: var(--subtle);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.app-shell .cc-approval-row-side { flex: 0 0 auto; }
+.app-shell[data-theme="dark"] .cc-approval-row:hover { background: var(--nav-hover); }
+@media (max-width: 1000px) {
+  .app-shell .cc-approval-split { grid-template-columns: 1fr; }
+  .app-shell .cc-approval-side { position: static; max-height: 260px; }
+}
