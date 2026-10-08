@@ -1,9 +1,8 @@
 /* Review-driven layout refinements, scoped to the management app. */
 .app-shell .sidebar { border-right-color: var(--nav-line); }
 .app-shell .logo-row { border-bottom-color: var(--nav-line); }
-.app-shell .logo-row { height: 72px; flex-direction: column; align-items: flex-start; justify-content: center; gap: 2px; }
-.app-shell .logo-row .brand-logo { height: 32px; max-width: 190px; }
-.app-shell .logo-subtitle { color: #9FB5CF; font-size: 10.5px; letter-spacing: .08em; padding-left: 2px; }
+.app-shell .logo-row { height: 82px; padding: 0 10px; align-items: center; justify-content: center; }
+.app-shell .logo-row .brand-logo { display: block; width: 100%; height: auto; max-width: 220px; max-height: 48px; object-fit: contain; }
 .app-shell .nav-group-label { color: #A8BBD0; font-size: 10.5px; font-weight: 600; letter-spacing: .1em; }
 .app-shell .nav-group-system { margin-top: 12px; padding-top: 20px; border-top: 1px solid rgba(255,255,255,.08); }
 .app-shell .nav-item { border-left: 3px solid transparent; border-radius: 0 10px 10px 0; }
