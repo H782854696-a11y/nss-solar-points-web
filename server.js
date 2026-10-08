@@ -51,10 +51,13 @@ function getSessionUser(req) {
   // 账号被停用后，已存在的会话立即失效（不能只靠登录那一刻拦截）
   if (user.disabled) { sessions.delete(sid); return null; }
   // 临时口令只能访问会话资料、改密和退出接口；所有业务 API 一律 fail closed。
-  if (user.mustChangePassword && !['/api/auth/me', '/api/auth/change-password'].includes(req.path)) return null;
+  if (requiresForcedPasswordChange(user) && !['/api/auth/me', '/api/auth/change-password'].includes(req.path)) return null;
   const { password, ...safe } = user;
-  return safe;
+  return { ...safe, mustChangePassword: requiresForcedPasswordChange(user) };
 }
+
+function isStoreManagerRole(role) { return rbac.normalizeRole(role) === 'store_manager'; }
+function requiresForcedPasswordChange(user) { return !!user?.mustChangePassword && !isStoreManagerRole(user.role); }
 
 // ---------- 登录失败限流（防暴力破解） ----------
 // 同一 IP + 账号连续失败 5 次锁定 5 分钟。失败尝试也写审计，便于事后发现异常。
@@ -176,7 +179,7 @@ app.post('/api/auth/login', (req, res) => {
   res.cookie(SESSION_COOKIE, sid, { httpOnly: true, sameSite: 'lax', secure: isHttps, maxAge: SESSION_TTL_MS });
   const { password: _pw, ...safe } = user;
   auditLog(`login: ${user.username}`);
-  res.json({ ok: true, user: safe, mustChangePassword: !!user.mustChangePassword });
+  res.json({ ok: true, user: { ...safe, mustChangePassword: requiresForcedPasswordChange(user) }, mustChangePassword: requiresForcedPasswordChange(user) });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -404,7 +407,7 @@ app.post('/api/stores/:id/managers', (req, res) => {
     }
     manager = existing;
     manager.password = bcrypt.hashSync(b.password, 12);
-    manager.mustChangePassword = true;
+    manager.mustChangePassword = false;
     manager.name = String(b.name).trim();
     manager.phone = b.phone || '';
     manager.storeId = store.id;
@@ -421,7 +424,7 @@ app.post('/api/stores/:id/managers', (req, res) => {
       phone: b.phone || '',
       createdAt: nowIso(),
       disabled: false,
-      mustChangePassword: true,
+      mustChangePassword: false,
     };
     users.push(manager);
   }
@@ -639,7 +642,7 @@ app.post('/api/users/:id/reset-password', (req, res) => {
   if (newPassword.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
 
   target.password = bcrypt.hashSync(newPassword, 12);
-  target.mustChangePassword = true;
+  target.mustChangePassword = !isStoreManagerRole(target.role);
   writeAll('users', users);   // 只改 password 一个字段 → dataVersion 正常 +1
   // 作废该账号的全部旧会话
   let killed = 0;
@@ -1188,7 +1191,7 @@ app.post('/api/v2/users', (req, res) => {
   const PH_ROLES = new Set(['philippines_manager', 'regional_manager', 'store_manager', 'manager', 'sales', 'warehouse', 'service']);
   const storeRegion = store?.regionId ? regions.find(x => x.id === store.regionId) : null;
   const userCountry = region?.countryCode || storeRegion?.countryCode || (PH_ROLES.has(role) ? 'PH' : (b.country || 'CN'));
-  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, storeId: store?.id || null, regionId: role === 'regional_manager' ? region.id : (region?.id || store?.regionId || null), employeeId: employee?.id || null, phone: controlCenter.cleanText(b.phone, 80), createdAt: nowIso(), disabled: false, mustChangePassword: true, country: userCountry };
+  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, storeId: store?.id || null, regionId: role === 'regional_manager' ? region.id : (region?.id || store?.regionId || null), employeeId: employee?.id || null, phone: controlCenter.cleanText(b.phone, 80), createdAt: nowIso(), disabled: false, mustChangePassword: !isStoreManagerRole(role), country: userCountry };
   users.push(user); writeAll('users', users);
   if (employee) { employee.userId = user.id; employee.name = name; if (!employee.storeId && store) employee.storeId = store.id; if (!employee.regionId) employee.regionId = user.regionId; employee.updatedAt = nowIso(); writeAll('employees', employees); }
   if (role === 'manager' && store) { store.managerId = user.id; store.managerName = name; writeAll('stores', stores); }

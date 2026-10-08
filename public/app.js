@@ -4224,7 +4224,7 @@ function resetPasswordDialog(account) {
     const root = openModal({
       title: t('accounts.resetPwTitle'),
       body: `
-        <div style="font-size:13.5px;line-height:1.75;color:var(--muted);">${escapeHtml(t('accounts.resetPwBody', { username: account.username, name: tName(account.name) }))}</div>
+        <div style="font-size:13.5px;line-height:1.75;color:var(--muted);">${escapeHtml(t(['manager', 'store_manager'].includes(account.role) ? 'accounts.resetPwBodyManager' : 'accounts.resetPwBody', { username: account.username, name: tName(account.name) }))}</div>
         <div style="margin-top:14px;display:flex;gap:8px;align-items:flex-end;">
           <label style="flex:1;display:flex;flex-direction:column;gap:6px;">
             <span style="font-size:12px;color:var(--muted);">${escapeHtml(t('accounts.resetPwLabel'))}</span>
@@ -4267,7 +4267,7 @@ function showNewPasswordDialog(account, password) {
   const root = openModal({
     title: t('accounts.resetPwDone'),
     body: `
-      <div style="font-size:13.5px;line-height:1.75;">${escapeHtml(t('accounts.resetPwDoneBody', { username: account.username }))}</div>
+      <div style="font-size:13.5px;line-height:1.75;">${escapeHtml(t(['manager', 'store_manager'].includes(account.role) ? 'accounts.resetPwDoneBodyManager' : 'accounts.resetPwDoneBody', { username: account.username }))}</div>
       <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
         <code id="npVal" style="flex:1;background:#EDF1EE;padding:10px 14px;border-radius:8px;font-size:15px;letter-spacing:1px;user-select:all;">${escapeHtml(password)}</code>
         <button class="btn btn-sm" id="npCopy" type="button">${escapeHtml(t('accounts.resetPwCopy'))}</button>
