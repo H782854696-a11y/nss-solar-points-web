@@ -56,6 +56,7 @@ console.log('\n【2】admin 向后兼容（保留业务权限用于运维）');
 let adminAll = true; const adminMissing = [];
 for (const p of rbac.PERMISSIONS) {
   if (p === 'kingdee.edit') continue;             // 金蝶绝不回写，admin 也不行
+  if (p === 'deposit.submit') continue;           // 只能由绑定门店的店长上传凭证
   if (!rbac.hasPermission(U.admin, p)) { adminAll = false; adminMissing.push(p); }
 }
 ok(`admin 拥有除 kingdee.edit 外的全部 ${rbac.PERMISSIONS.length - 1} 个权限`, adminAll, adminMissing);

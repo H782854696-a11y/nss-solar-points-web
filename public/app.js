@@ -525,34 +525,42 @@ async function renderScreen() {
   }
 }
 
-// 当日存款只跟踪门店上报状态，不记录存款金额，也不充当银行到账核验。
+// 当日存款不记录金额，也不充当银行到账核验；店长提交凭证后须由有审核权限的人员确认。
 async function renderDailyDeposits(root) {
   const data = await GET('/api/v2/daily-deposits');
   const items = Array.isArray(data.items) ? data.items : [];
-  const deposited = items.filter(item => item.status === 'deposited').length;
-  const pending = items.length - deposited;
+  const confirmed = items.filter(item => item.status === 'confirmed').length;
+  const awaitingReview = items.filter(item => item.status === 'pending_review').length;
+  const rejected = items.filter(item => item.status === 'rejected').length;
+  const notDeposited = items.filter(item => item.status === 'not_deposited').length;
   const filter = state.depositFilter || 'all';
-  const visible = items.filter(item => filter === 'all' || (filter === 'deposited' ? item.status === 'deposited' : item.status !== 'deposited'));
+  const visible = items.filter(item => filter === 'all' || item.status === filter);
   const phTime = value => value ? new Intl.DateTimeFormat(String(locale()).toLowerCase().startsWith('zh') ? 'zh-CN' : 'en-PH', { timeZone: 'Asia/Manila', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) : '';
-  const percent = items.length ? Math.round(deposited / items.length * 100) : 0;
+  const percent = items.length ? Math.round(confirmed / items.length * 100) : 0;
+  const depositStatus = item => ({
+    confirmed: [ccText('Confirmed', '已确认'), 'success'],
+    pending_review: [ccText('Pending review', '待审核'), 'warning'],
+    rejected: [ccText('Rejected', '已驳回'), 'danger'],
+    not_deposited: [ccText('Not deposited', '未存款'), 'warning'],
+  })[item.status] || [ccText('Pending review', '待审核'), 'warning'];
   root.innerHTML = `
     <div class="page-header deposit-header"><div class="page-header-text"><div class="page-title">${ccText('Daily Bank Deposits', '当日存款')}</div><div class="page-subtitle">${ccText('Track each store’s deposit report before closing time', '查看各门店下班前的存款上报进度')}</div></div><span class="deposit-date">${escapeHtml(data.date)} · ${ccText('Philippines time', '菲律宾时间')}</span></div>
     <section class="deposit-summary" aria-label="${ccText('Deposit progress', '存款进度')}">
       ${uiStat(ccText('Stores', '门店总数'), items.length, 'brand')}
-      ${uiStat(ccText('Deposited', '已存款'), deposited, 'success')}
-      ${uiStat(ccText('Not deposited', '未存款'), pending, 'warning')}
-      <div class="card deposit-progress"><div class="deposit-progress-top"><span>${ccText('Today’s progress', '今日进度')}</span><strong>${percent}%</strong></div><div class="deposit-progress-track"><span style="width:${percent}%"></span></div><small>${deposited} / ${items.length} ${ccText('stores reported', '家门店已上报')}</small></div>
+      ${uiStat(ccText('Confirmed', '已确认'), confirmed, 'success')}
+      ${uiStat(ccText('Pending review', '待审核'), awaitingReview, 'warning')}
+      <div class="card deposit-progress"><div class="deposit-progress-top"><span>${ccText('Today’s confirmation progress', '今日确认进度')}</span><strong>${percent}%</strong></div><div class="deposit-progress-track"><span style="width:${percent}%"></span></div><small>${confirmed} / ${items.length} ${ccText('stores confirmed', '家门店已确认')}${rejected ? ` · ${rejected} ${ccText('rejected', '已驳回')}` : ''}${notDeposited ? ` · ${notDeposited} ${ccText('not deposited', '未存款')}` : ''}</small></div>
     </section>
     <section class="card deposit-panel">
       <div class="deposit-panel-head"><div><h3>${ccText('Store deposit status', '各门店存款状态')}</h3><p>${ccText('“Deposited” means the store reported completion. Confirm bank receipt in your banking system.', '“已存款”为门店上报状态；银行实际到账请以银行系统为准。')}</p></div><button type="button" class="btn btn-sm" id="depositRefresh">${ccText('Refresh', '刷新状态')}</button></div>
       <div class="deposit-filters" role="group" aria-label="${ccText('Filter status', '筛选状态')}">
-        ${[['all',ccText('All', '全部')],['not_deposited',ccText('Not deposited', '未存款')],['deposited',ccText('Deposited', '已存款')]].map(([value,label]) => `<button type="button" class="btn btn-sm ${filter === value ? 'active' : ''}" data-deposit-filter="${value}">${label}</button>`).join('')}
+        ${[['all',ccText('All', '全部')],['not_deposited',ccText('Not deposited', '未存款')],['pending_review',ccText('Pending review', '待审核')],['confirmed',ccText('Confirmed', '已确认')],['rejected',ccText('Rejected', '已驳回')]].map(([value,label]) => `<button type="button" class="btn btn-sm ${filter === value ? 'active' : ''}" data-deposit-filter="${value}">${label}</button>`).join('')}
       </div>
       <div class="deposit-list">${visible.length ? visible.map(item => {
-        const done = item.status === 'deposited';
-        const canRemind = data.canRemind && !done;
-        const canSubmit = data.canSubmit && can('deposit.submit') && !done;
-        return `<article class="deposit-row"><div class="deposit-store"><span class="deposit-store-icon" aria-hidden="true">▣</span><div><strong>${escapeHtml(tStore(item.storeName))}</strong><small>${escapeHtml(item.storeCode || '')}${item.storeCode ? ' · ' : ''}${ccText('Manager', '店长')}：${escapeHtml(item.managerName || ccText('Unassigned', '未分配'))}</small></div></div><div class="deposit-state"><span class="cc-status cc-status-${done ? 'success' : 'warning'}"><i></i>${done ? ccText('Deposited', '已存款') : ccText('Not deposited', '未存款')}</span>${done ? `<small>${ccText('Reported', '上报')} ${escapeHtml(phTime(item.reportedAt))} · ${escapeHtml(item.reportedByName || '')}${item.receipt ? ` · ${ccText('Receipt uploaded', '已上传凭证')}` : ''}</small>` : item.lastReminderAt ? `<small>${ccText('Reminded', '已提醒')} ${escapeHtml(phTime(item.lastReminderAt))} · ${ccText('Times', '次数')} ${Number(item.reminderCount || 0)}</small>` : `<small>${ccText('Awaiting store confirmation', '等待门店确认')}</small>`}</div><div class="deposit-actions">${done && item.receipt ? `<button type="button" class="btn btn-sm" data-deposit-receipt="${escapeHtml(item.storeId)}">${ccText('View receipt', '查看凭证')}</button>` : ''}${canRemind ? `<button type="button" class="btn btn-sm" data-deposit-remind="${escapeHtml(item.storeId)}" ${!item.hasManager ? `disabled title="${ccText('Assign a store manager first', '请先绑定店长账号')}"` : ''}>${item.lastReminderAt ? ccText('Remind again', '再次提醒') : ccText('Remind manager', '提醒店长')}</button>` : ''}${canSubmit ? `<button type="button" class="btn btn-sm btn-primary" data-deposit-confirm="${escapeHtml(item.storeId)}">${ccText('Confirm deposit', '确认已存款')}</button>` : ''}</div></article>`;
+        const [statusLabel, statusClass] = depositStatus(item);
+        const canRemind = data.canRemind && item.status === 'not_deposited';
+        const canSubmit = data.canSubmit && can('deposit.submit') && ['not_deposited', 'rejected'].includes(item.status);
+        return `<article class="deposit-row"><div class="deposit-store"><span class="deposit-store-icon" aria-hidden="true">▣</span><div><strong>${escapeHtml(tStore(item.storeName))}</strong><small>${escapeHtml(item.storeCode || '')}${item.storeCode ? ' · ' : ''}${ccText('Manager', '店长')}：${escapeHtml(item.managerName || ccText('Unassigned', '未分配'))}</small></div></div><div class="deposit-state"><span class="cc-status cc-status-${statusClass}"><i></i>${statusLabel}</span>${item.status === 'not_deposited' ? (item.lastReminderAt ? `<small>${ccText('Reminded', '已提醒')} ${escapeHtml(phTime(item.lastReminderAt))} · ${ccText('Times', '次数')} ${Number(item.reminderCount || 0)}</small>` : `<small>${ccText('Awaiting store confirmation', '等待门店提交')}</small>`) : `<small>${ccText('Submitted', '提交')} ${escapeHtml(phTime(item.reportedAt))} · ${escapeHtml(item.reportedByName || '')}${item.reviewedAt ? ` · ${ccText('Reviewed', '审核')} ${escapeHtml(phTime(item.reviewedAt))}` : ''}${item.status === 'rejected' ? ` · ${escapeHtml(item.rejectionReason || '')}` : ''}</small>`}</div><div class="deposit-actions">${item.receipt ? `<button type="button" class="btn btn-sm" data-deposit-receipt="${escapeHtml(item.storeId)}">${ccText('View receipt', '查看凭证')}</button>` : ''}${canRemind ? `<button type="button" class="btn btn-sm" data-deposit-remind="${escapeHtml(item.storeId)}" ${!item.hasManager ? `disabled title="${ccText('Assign a store manager first', '请先绑定店长账号')}"` : ''}>${item.lastReminderAt ? ccText('Remind again', '再次提醒') : ccText('Remind manager', '提醒店长')}</button>` : ''}${canSubmit ? `<button type="button" class="btn btn-sm btn-primary" data-deposit-confirm="${escapeHtml(item.storeId)}">${item.status === 'rejected' ? ccText('Resubmit receipt', '重新提交凭证') : ccText('Submit deposit', '提交存款凭证')}</button>` : ''}</div></article>`;
       }).join('') : `<div class="cc-empty-state"><strong>${items.length ? ccText('No stores match this filter', '此筛选条件下没有门店') : ccText('No stores available', '暂无可查看的门店')}</strong></div>`}</div>
     </section>`;
   root.querySelector('#depositRefresh')?.addEventListener('click', () => renderDailyDeposits(root));
@@ -563,15 +571,30 @@ async function renderDailyDeposits(root) {
     catch (error) { button.disabled = false; toast(error.message, 'error'); }
   }));
   root.querySelectorAll('[data-deposit-receipt]').forEach(button => button.addEventListener('click', () => {
-    window.open(`/api/v2/daily-deposits/${encodeURIComponent(button.dataset.depositReceipt)}/receipt`, '_blank', 'noopener');
+    const item = items.find(entry => entry.storeId === button.dataset.depositReceipt);
+    if (!item?.receipt) return;
+    const reviewer = data.canReview && can('deposit.review') && item.status === 'pending_review';
+    const receiptUrl = `/api/v2/daily-deposits/${encodeURIComponent(item.storeId)}/receipt`;
+    const modal = openModal({ title: ccText('Deposit receipt review', '存款凭证审核'), wide: true,
+      body: `<div class="deposit-receipt-meta"><strong>${escapeHtml(tStore(item.storeName))}</strong><span>${escapeHtml(data.date)} · ${ccText('Submitted by', '提交人')}：${escapeHtml(item.reportedByName || '')} · ${escapeHtml(phTime(item.reportedAt))}</span>${item.status === 'rejected' ? `<p>${ccText('Previous rejection reason', '上次驳回原因')}：${escapeHtml(item.rejectionReason || '')}</p>` : ''}</div><img class="deposit-receipt-preview" src="${receiptUrl}" alt="${escapeHtml(ccText('Deposit receipt', '存款凭证'))}"/>${reviewer ? `<label class="cc-field"><span>${ccText('Rejection reason (required only when rejecting)', '驳回原因（仅驳回时必填）')}</span><textarea id="depositRejectReason" rows="3" maxlength="1000" placeholder="${escapeHtml(ccText('Explain what needs to be corrected', '请说明需要更正的问题'))}"></textarea></label>` : ''}`,
+      footer: reviewer ? `<button class="btn" data-close>${ccText('Close', '关闭')}</button><button class="btn btn-danger" id="depositReject">${ccText('Reject', '驳回')}</button><button class="btn btn-primary" id="depositApprove">${ccText('Confirm deposit', '确认存款')}</button>` : `<button class="btn" data-close>${ccText('Close', '关闭')}</button>` });
+    const review = async decision => {
+      const reason = modal.querySelector('#depositRejectReason')?.value || '';
+      if (decision === 'rejected' && !reason.trim()) { toast(ccText('Enter a rejection reason', '请填写驳回原因'), 'error'); return; }
+      modal.querySelectorAll('button').forEach(x => { x.disabled = true; });
+      try { await POST(`/api/v2/daily-deposits/${encodeURIComponent(item.storeId)}/review`, { decision, reason }); closeModal(); toast(decision === 'confirmed' ? ccText('Deposit confirmed', '存款已确认') : ccText('Receipt rejected; the manager can resubmit', '凭证已驳回，店长可重新提交'), 'success'); await renderDailyDeposits(root); }
+      catch (error) { modal.querySelectorAll('button').forEach(x => { x.disabled = false; }); toast(error.message, 'error'); }
+    };
+    modal.querySelector('#depositApprove')?.addEventListener('click', () => review('confirmed'));
+    modal.querySelector('#depositReject')?.addEventListener('click', () => review('rejected'));
   }));
   root.querySelectorAll('[data-deposit-confirm]').forEach(button => button.addEventListener('click', () => {
     const item = items.find(entry => entry.storeId === button.dataset.depositConfirm);
     if (!item) return;
-    const modal = openModal({ title: ccText('Confirm bank deposit', '确认当日存款'), body: `<form id="depositConfirmForm" class="cc-form-grid"><p class="cc-meta cc-wide">${escapeHtml(tStore(item.storeName))} · ${escapeHtml(data.date)}<br>${ccText('Upload the bank receipt image to confirm. This reports that the store has deposited cash; it does not verify bank settlement.', '请上传银行存款凭证图片后确认。此操作记录门店已办理存款，不代表银行到账核验。')}</p><label class="cc-field cc-wide"><span>${ccText('Deposit receipt (JPG, JPEG or PNG, required; max. 5 MB)', '存款凭证（JPG、JPEG 或 PNG，必传；最大 5MB）')}</span><input name="receipt" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" required/></label></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="depositConfirmSubmit">${ccText('Confirm deposited', '确认已存款')}</button>`, wide: true });
+    const modal = openModal({ title: ccText('Submit bank deposit', '提交当日存款'), body: `<form id="depositConfirmForm" class="cc-form-grid"><p class="cc-meta cc-wide">${escapeHtml(tStore(item.storeName))} · ${escapeHtml(data.date)}<br>${item.status === 'rejected' ? `${ccText('Your previous receipt was rejected. Upload a corrected receipt for review.', '上次凭证已被驳回，请上传正确凭证重新审核。')}<br>${ccText('Reason', '原因')}：${escapeHtml(item.rejectionReason || '')}` : ccText('Upload the bank receipt image for administrator review. This reports that the store has deposited cash; it does not verify bank settlement.', '请上传银行存款凭证，等待管理员审核。此操作记录门店已办理存款，不代表银行到账核验。')}</p><label class="cc-field cc-wide"><span>${ccText('Deposit receipt (JPG, JPEG or PNG, required; max. 5 MB)', '存款凭证（JPG、JPEG 或 PNG，必传；最大 5MB）')}</span><input name="receipt" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" required/></label></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="depositConfirmSubmit">${ccText('Submit for review', '提交审核')}</button>`, wide: true });
     modal.querySelector('#depositConfirmSubmit')?.addEventListener('click', async event => {
       event.target.disabled = true;
-      try { const receipt = new FormData(modal.querySelector('#depositConfirmForm')).get('receipt'); if (!receipt || !receipt.size) throw new Error(ccText('Upload the deposit receipt image first', '请先上传存款凭证图片')); const mimeType = uploadMimeType(receipt); if (!['image/jpeg', 'image/png'].includes(mimeType) || receipt.size > 5 * 1024 * 1024) throw new Error(ccText('Use a JPG, JPEG or PNG image no larger than 5 MB', '请上传不超过 5MB 的 JPG、JPEG 或 PNG 图片')); await POST(`/api/v2/daily-deposits/${encodeURIComponent(item.storeId)}/confirm`, { receipt: { fileName: receipt.name, mimeType, data: await readFileAsDataUrl(receipt, mimeType) } }); closeModal(); toast(ccText('Deposit reported', '存款状态已上报'), 'success'); await renderDailyDeposits(root); }
+      try { const receipt = new FormData(modal.querySelector('#depositConfirmForm')).get('receipt'); if (!receipt || !receipt.size) throw new Error(ccText('Upload the deposit receipt image first', '请先上传存款凭证图片')); const mimeType = uploadMimeType(receipt); if (!['image/jpeg', 'image/png'].includes(mimeType) || receipt.size > 5 * 1024 * 1024) throw new Error(ccText('Use a JPG, JPEG or PNG image no larger than 5 MB', '请上传不超过 5MB 的 JPG、JPEG 或 PNG 图片')); await POST(`/api/v2/daily-deposits/${encodeURIComponent(item.storeId)}/confirm`, { receipt: { fileName: receipt.name, mimeType, data: await readFileAsDataUrl(receipt, mimeType) } }); closeModal(); toast(ccText('Submitted for review', '已提交审核'), 'success'); await renderDailyDeposits(root); }
       catch (error) { event.target.disabled = false; toast(error.message, 'error'); }
     });
   }));

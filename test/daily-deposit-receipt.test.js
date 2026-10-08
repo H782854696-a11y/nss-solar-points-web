@@ -22,7 +22,7 @@ function freePort() {
   });
 }
 
-test('daily deposit requires a valid receipt image and exposes it to authorized viewers', { timeout: 30000 }, async t => {
+test('daily deposit receipt is reviewed in a confirm/reject flow and rejected receipts can be resubmitted', { timeout: 30000 }, async t => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nss-daily-deposit-'));
   const port = await freePort();
   const child = spawn(process.execPath, ['server.js'], { cwd: path.join(__dirname, '..'), env: { ...process.env, SP_DATA_DIR: dataDir, SP_ADMIN_PASSWORD: initialPassword, PORT: String(port) }, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -52,11 +52,29 @@ test('daily deposit requires a valid receipt image and exposes it to authorized 
   assert.equal((await request('POST', `/api/v2/daily-deposits/${storeId}/confirm`, { receipt: { fileName: 'fake.png', mimeType: 'image/png', data: 'data:image/png;base64,ZXhl' } }, manager)).status, 400, 'fake PNG is rejected');
   const confirmed = await request('POST', `/api/v2/daily-deposits/${storeId}/confirm`, { receipt: { fileName: 'bank-receipt.png', mimeType: 'image/png', data: tinyPng } }, manager);
   assert.equal(confirmed.status, 201, JSON.stringify(confirmed.data));
+  assert.equal(confirmed.data.item.status, 'pending_review');
   assert.equal(confirmed.data.item.receipt.name, 'bank-receipt.png');
   assert.equal(Object.hasOwn(confirmed.data.item.receipt, 'storedName'), false, 'internal storage name is never exposed');
   const list = await request('GET', '/api/v2/daily-deposits', null, admin);
+  assert.equal(list.data.items.find(x => x.storeId === storeId).status, 'pending_review');
   assert.equal(list.data.items.find(x => x.storeId === storeId).receipt.mimeType, 'image/png');
   const receipt = await request('GET', `/api/v2/daily-deposits/${storeId}/receipt`, null, admin);
   assert.equal(receipt.status, 200);
   assert.equal(receipt.body.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])), true, 'viewer receives the stored PNG');
+  assert.equal((await request('POST', `/api/v2/daily-deposits/${storeId}/review`, { decision: 'confirmed' }, manager)).status, 403, 'store manager cannot review own receipt');
+  assert.equal((await request('POST', `/api/v2/daily-deposits/${storeId}/review`, { decision: 'rejected' }, admin)).status, 400, 'a rejection reason is required');
+  const rejected = await request('POST', `/api/v2/daily-deposits/${storeId}/review`, { decision: 'rejected', reason: 'Receipt is incomplete' }, admin);
+  assert.equal(rejected.status, 200, JSON.stringify(rejected.data));
+  assert.equal(rejected.data.item.status, 'rejected');
+  assert.equal(rejected.data.item.rejectionReason, 'Receipt is incomplete');
+  const resubmitted = await request('POST', `/api/v2/daily-deposits/${storeId}/confirm`, { receipt: { fileName: 'corrected-receipt.png', mimeType: 'image/png', data: tinyPng } }, manager);
+  assert.equal(resubmitted.status, 201, JSON.stringify(resubmitted.data));
+  assert.equal(resubmitted.data.item.status, 'pending_review');
+  assert.equal(resubmitted.data.item.submissionCount, 2);
+  const reviewed = await request('POST', `/api/v2/daily-deposits/${storeId}/review`, { decision: 'confirmed' }, admin);
+  assert.equal(reviewed.status, 200, JSON.stringify(reviewed.data));
+  assert.equal(reviewed.data.item.status, 'confirmed');
+  assert.ok(reviewed.data.item.reviewedByName, 'the reviewer identity is recorded');
+  const persisted = JSON.parse(fs.readFileSync(path.join(dataDir, 'dailyDeposits.json'), 'utf8'))[0];
+  assert.equal(persisted.receiptHistory.length, 1, 'old receipt metadata is retained instead of deleting uploaded evidence');
 });

@@ -1026,6 +1026,23 @@ function depositResource(storeItem) {
   const indexes = countryIndexes();
   return { storeId: storeItem.id, regionId: storeItem.regionId || null, country: countryOf(storeItem, indexes.regionIndex, indexes.storeIndex, indexes.orgIndex) };
 }
+function normalizedDailyDepositStatus(deposit) {
+  // Before review was introduced, `reported` meant a completed deposit.  Keep
+  // those persisted records readable as confirmed without rewriting history.
+  if (deposit?.status === 'reported') return 'confirmed';
+  return ['pending_review', 'confirmed', 'rejected'].includes(deposit?.status) ? deposit.status : 'pending_review';
+}
+function publicDailyDeposit(deposit) {
+  if (!deposit) return null;
+  const receipt = deposit.receipt;
+  return {
+    id: deposit.id, status: normalizedDailyDepositStatus(deposit),
+    reportedAt: deposit.reportedAt || null, reportedByName: deposit.reportedByName || null,
+    reviewedAt: deposit.reviewedAt || null, reviewedByName: deposit.reviewedByName || null,
+    rejectionReason: deposit.rejectionReason || null, submissionCount: Number(deposit.submissionCount || 1),
+    receipt: receipt ? { id: receipt.id, name: receipt.name, mimeType: receipt.mimeType, size: receipt.size, uploadedAt: receipt.uploadedAt } : null,
+  };
+}
 
 // A confirmation is a manager's report, not bank reconciliation. No amount or ledger data is copied here.
 app.get('/api/v2/daily-deposits', (req, res) => {
@@ -1037,19 +1054,18 @@ app.get('/api/v2/daily-deposits', (req, res) => {
     .filter(item => { const resource = depositResource(item); return resource.country === 'PH' && rbac.can(u, 'deposit.view', resource); })
     .map(item => {
       const manager = users.find(user => user.id === item.managerId && !user.disabled && rbac.normalizeRole(user.role) === 'store_manager' && user.storeId === item.id);
-      const deposit = deposits.find(entry => entry.storeId === item.id && entry.depositDate === date && entry.status === 'reported');
+      const deposit = deposits.find(entry => entry.storeId === item.id && entry.depositDate === date);
       const reminder = tasks.find(task => task.kind === 'daily_deposit' && task.storeId === item.id && task.depositDate === date);
       return {
         storeId: item.id, storeName: item.name, storeCode: item.storeCode || '', regionId: item.regionId || null,
         managerName: manager?.name || manager?.username || item.managerName || '', hasManager: !!manager,
-        status: deposit ? 'deposited' : 'not_deposited',
-        reportedAt: deposit?.reportedAt || null, reportedByName: deposit?.reportedByName || null,
-        receipt: deposit?.receipt ? { id: deposit.receipt.id, name: deposit.receipt.name, mimeType: deposit.receipt.mimeType, size: deposit.receipt.size, uploadedAt: deposit.receipt.uploadedAt } : null,
+        status: deposit ? normalizedDailyDepositStatus(deposit) : 'not_deposited',
+        ...publicDailyDeposit(deposit),
         reminderCount: Number(reminder?.reminderCount || 0), lastReminderAt: reminder?.lastReminderAt || null,
         reminderTaskId: reminder?.status === 'open' ? reminder.id : null,
       };
     });
-  res.json({ date, timezone: 'Asia/Manila', items, canRemind: rbac.hasPermission(u, 'deposit.remind'), canSubmit: rbac.hasPermission(u, 'deposit.submit') });
+  res.json({ date, timezone: 'Asia/Manila', items, canRemind: rbac.hasPermission(u, 'deposit.remind'), canSubmit: rbac.hasPermission(u, 'deposit.submit'), canReview: rbac.hasPermission(u, 'deposit.review') });
 });
 
 app.post('/api/v2/daily-deposits/:storeId/remind', (req, res) => {
@@ -1060,7 +1076,7 @@ app.post('/api/v2/daily-deposits/:storeId/remind', (req, res) => {
   if (resource.country !== 'PH') return res.status(409).json({ error: '当日存款仅适用于菲律宾门店' });
   if (!guard.check(req, res, 'deposit.remind', resource)) return;
   const date = manilaToday();
-  if ((readAll('dailyDeposits') || []).some(item => item.storeId === linkedStore.id && item.depositDate === date && item.status === 'reported')) return res.status(409).json({ error: '该门店今天已上报存款' });
+  if ((readAll('dailyDeposits') || []).some(item => item.storeId === linkedStore.id && item.depositDate === date && normalizedDailyDepositStatus(item) !== 'rejected')) return res.status(409).json({ error: '该门店今天已有待审核或已确认的存款记录' });
   const manager = (readAll('users') || []).find(user => user.id === linkedStore.managerId && !user.disabled && rbac.normalizeRole(user.role) === 'store_manager' && user.storeId === linkedStore.id);
   if (!manager) return res.status(409).json({ error: '该门店尚无有效店长账号，请先绑定店长' });
   const tasks = readAll('tasks') || [];
@@ -1107,30 +1123,66 @@ app.post('/api/v2/daily-deposits/:storeId/confirm', (req, res) => {
   if (resource.country !== 'PH') return res.status(409).json({ error: '当日存款仅适用于菲律宾门店' });
   if (!guard.check(req, res, 'deposit.submit', resource)) return;
   const date = manilaToday(), deposits = readAll('dailyDeposits') || [];
-  if (deposits.some(item => item.storeId === linkedStore.id && item.depositDate === date)) return res.status(409).json({ error: '该门店今天已确认存款，请勿重复提交' });
+  const existingIndex = deposits.findIndex(item => item.storeId === linkedStore.id && item.depositDate === date);
+  const existing = existingIndex >= 0 ? deposits[existingIndex] : null;
+  if (existing && normalizedDailyDepositStatus(existing) !== 'rejected') return res.status(409).json({ error: '该门店今天已有待审核或已确认的存款记录，请勿重复提交' });
   const parsedReceipt = parseDailyDepositReceipt(req.body?.receipt);
   if (parsedReceipt.error) return res.status(400).json({ error: parsedReceipt.error });
   const now = nowIso();
   const receiptId = nanoid(), receipt = { id: receiptId, name: parsedReceipt.value.name, mimeType: parsedReceipt.value.mimeType, size: parsedReceipt.value.buffer.length, storedName: `${receiptId}${parsedReceipt.value.ext}`, uploadedAt: now };
-  const item = { id: nanoid(), storeId: linkedStore.id, regionId: linkedStore.regionId || null, country: resource.country, depositDate: date, status: 'reported', receipt, reportedBy: u.id, reportedByName: u.name || u.username, reportedAt: now, createdAt: now, updatedAt: now };
+  const item = existing
+    ? { ...existing, status: 'pending_review', receipt, receiptHistory: [...(Array.isArray(existing.receiptHistory) ? existing.receiptHistory : []), ...(existing.receipt ? [existing.receipt] : [])], submissionCount: Number(existing.submissionCount || 1) + 1, reportedBy: u.id, reportedByName: u.name || u.username, reportedAt: now, reviewedBy: null, reviewedByName: null, reviewedAt: null, rejectionReason: null, updatedAt: now }
+    : { id: nanoid(), storeId: linkedStore.id, regionId: linkedStore.regionId || null, country: resource.country, depositDate: date, status: 'pending_review', receipt, receiptHistory: [], submissionCount: 1, reportedBy: u.id, reportedByName: u.name || u.username, reportedAt: now, reviewedBy: null, reviewedByName: null, reviewedAt: null, rejectionReason: null, createdAt: now, updatedAt: now };
   try {
     fs.mkdirSync(dailyDepositAttachmentDir, { recursive: true, mode: 0o700 }); fs.chmodSync(dailyDepositAttachmentDir, 0o700);
     fs.writeFileSync(path.join(dailyDepositAttachmentDir, receipt.storedName), parsedReceipt.value.buffer, { mode: 0o600, flag: 'wx' });
-    deposits.unshift(item); writeAll('dailyDeposits', deposits);
+    if (existingIndex >= 0) deposits.splice(existingIndex, 1, item); else deposits.unshift(item);
+    writeAll('dailyDeposits', deposits);
   } catch (err) {
     try { fs.unlinkSync(path.join(dailyDepositAttachmentDir, receipt.storedName)); } catch (cleanupError) {}
     return res.status(500).json({ error: '保存存款凭证失败，请重试' });
   }
   const tasks = readAll('tasks') || [], creators = new Set();
   let tasksChanged = false;
-  for (const task of tasks) if (task.kind === 'daily_deposit' && task.storeId === linkedStore.id && task.depositDate === date && !['completed','cancelled'].includes(task.status)) {
-    task.status = 'completed'; task.completedAt = now; task.updatedAt = now; tasksChanged = true;
+  for (const task of tasks) if (task.kind === 'daily_deposit' && task.storeId === linkedStore.id && task.depositDate === date && !['cancelled'].includes(task.status)) {
+    if (task.status === 'completed') { task.status = 'open'; task.completedAt = null; task.updatedAt = now; tasksChanged = true; }
     if (task.createdBy && task.createdBy !== u.id) creators.add(task.createdBy);
   }
   if (tasksChanged) writeAll('tasks', tasks);
-  for (const creator of creators) notifyUser(creator, 'daily_deposit.confirmed', '门店已上报当日存款', linkedStore.name, 'dailyDeposit', item.id);
-  recordControlAudit(req, u, 'daily_deposit.confirm', 'dailyDeposit', item.id, { storeId: item.storeId, depositDate: date });
-  res.status(201).json({ item: { ...item, receipt: { ...receipt, storedName: undefined } } });
+  for (const creator of creators) notifyUser(creator, 'daily_deposit.submitted', '门店已提交当日存款凭证，待审核', linkedStore.name, 'dailyDeposit', item.id);
+  recordControlAudit(req, u, 'daily_deposit.submit', 'dailyDeposit', item.id, { storeId: item.storeId, depositDate: date, submissionCount: item.submissionCount });
+  res.status(201).json({ item: publicDailyDeposit(item) });
+});
+app.post('/api/v2/daily-deposits/:storeId/review', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const linkedStore = (readAll('stores') || []).find(item => item.id === req.params.storeId);
+  if (!linkedStore) return res.status(404).json({ error: '门店不存在' });
+  const resource = depositResource(linkedStore);
+  if (resource.country !== 'PH') return res.status(409).json({ error: '当日存款仅适用于菲律宾门店' });
+  if (!guard.check(req, res, 'deposit.review', resource)) return;
+  const decision = String(req.body?.decision || '');
+  if (!['confirmed', 'rejected'].includes(decision)) return res.status(400).json({ error: '审核操作无效' });
+  const reason = String(req.body?.reason || '').trim();
+  if (decision === 'rejected' && !reason) return res.status(400).json({ error: '请填写驳回原因' });
+  if (reason.length > 1000) return res.status(400).json({ error: '驳回原因不能超过 1000 个字符' });
+  const date = manilaToday(), deposits = readAll('dailyDeposits') || [];
+  const item = deposits.find(entry => entry.storeId === linkedStore.id && entry.depositDate === date);
+  if (!item) return res.status(404).json({ error: '今日没有待审核的存款凭证' });
+  if (normalizedDailyDepositStatus(item) !== 'pending_review') return res.status(409).json({ error: '该存款凭证当前无需审核' });
+  const now = nowIso();
+  item.status = decision; item.reviewedBy = u.id; item.reviewedByName = u.name || u.username; item.reviewedAt = now;
+  item.rejectionReason = decision === 'rejected' ? reason : null; item.updatedAt = now;
+  writeAll('dailyDeposits', deposits);
+  const tasks = readAll('tasks') || []; let tasksChanged = false;
+  for (const task of tasks) if (task.kind === 'daily_deposit' && task.storeId === linkedStore.id && task.depositDate === date && !['cancelled'].includes(task.status)) {
+    if (decision === 'confirmed') { task.status = 'completed'; task.completedAt = now; }
+    else { task.status = 'open'; task.completedAt = null; }
+    task.updatedAt = now; tasksChanged = true;
+  }
+  if (tasksChanged) writeAll('tasks', tasks);
+  if (item.reportedBy && item.reportedBy !== u.id) notifyUser(item.reportedBy, `daily_deposit.${decision}`, decision === 'confirmed' ? '当日存款已确认' : '当日存款凭证被驳回', decision === 'confirmed' ? linkedStore.name : `${linkedStore.name}：${reason}`, 'dailyDeposit', item.id);
+  recordControlAudit(req, u, `daily_deposit.${decision}`, 'dailyDeposit', item.id, { storeId: item.storeId, depositDate: date, reason: decision === 'rejected' ? reason : undefined });
+  res.json({ item: publicDailyDeposit(item) });
 });
 app.get('/api/v2/daily-deposits/:storeId/receipt', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
@@ -1138,7 +1190,7 @@ app.get('/api/v2/daily-deposits/:storeId/receipt', (req, res) => {
   if (!linkedStore) return res.status(404).json({ error: '门店不存在' });
   const resource = depositResource(linkedStore);
   if (!guard.check(req, res, 'deposit.view', resource)) return;
-  const deposit = (readAll('dailyDeposits') || []).find(item => item.storeId === linkedStore.id && item.depositDate === manilaToday() && item.status === 'reported');
+  const deposit = (readAll('dailyDeposits') || []).find(item => item.storeId === linkedStore.id && item.depositDate === manilaToday());
   const receipt = deposit?.receipt;
   if (!receipt || !dailyDepositImageTypes[receipt.mimeType] || !/^[A-Za-z0-9_-]+\.(png|jpg)$/.test(receipt.storedName || '')) return res.status(404).json({ error: '存款凭证不存在' });
   const filePath = path.join(dailyDepositAttachmentDir, receipt.storedName);

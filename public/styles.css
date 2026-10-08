@@ -773,6 +773,10 @@ button, input, select, textarea { font-family: inherit; }
 .modal-close:hover { background: var(--line-soft); color: var(--ink); }
 .modal-body { padding: 22px 26px; display: flex; flex-direction: column; gap: 14px; }
 .modal-footer { padding: 16px 26px; border-top: 1px solid var(--line-soft); display: flex; justify-content: flex-end; gap: 8px; }
+.deposit-receipt-meta { display: grid; gap: 5px; color: var(--muted); }
+.deposit-receipt-meta strong { color: var(--ink); }
+.deposit-receipt-meta p { margin: 4px 0 0; }
+.deposit-receipt-preview { display: block; width: 100%; max-height: min(62vh, 760px); object-fit: contain; background: var(--line-soft); border: 1px solid var(--line); border-radius: 10px; }
 .modal-form-row { display: flex; flex-direction: column; gap: 6px; }
 /* label 本身必须纵向排（标签在上、控件在下），否则 span 与 input 同行、排版错乱（2026-09-25 修复） */
 .modal-form-row label { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
