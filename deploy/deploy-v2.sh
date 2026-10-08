@@ -163,6 +163,7 @@ module.exports = {
       SP_DATA_DIR: '/opt/solarpoints-v2/data',
       SP_DEPLOY_READ_ONLY: process.env.SP_DEPLOY_READ_ONLY || '0',
       SP_DISABLE_BACKGROUND_JOBS: process.env.SP_DISABLE_BACKGROUND_JOBS || '0',
+      SP_DEPLOY_STATE_FILE: '/opt/solarpoints-v2/release-history/active-deployment-state.json',
     },
   }],
 };

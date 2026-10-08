@@ -61,3 +61,20 @@ test('read-only server health validation rejects writes without modifying its da
   assert.equal(blocked.status, 503);
   assert.equal(fingerprint(data), before);
 });
+
+test('persistent interrupted deployment state blocks writes even if a process was started without the read-only flag', { timeout: 15000 }, async t => {
+  const sandbox = temp(); const data = path.join(sandbox, 'data'); fs.mkdirSync(data);
+  fs.writeFileSync(path.join(data, '_seeded.json'), JSON.stringify({ at: 'test' }));
+  const state = path.join(sandbox, 'active-deployment-state.json');
+  fs.writeFileSync(state, JSON.stringify({ phase: 'live_read_only_healthy' }));
+  const before = fingerprint(data), port = await freePort();
+  const child = spawn(process.execPath, ['server.js'], { cwd: root, env: { ...process.env, SP_DATA_DIR: data, SP_DEPLOY_STATE_FILE: state, SP_DISABLE_BACKGROUND_JOBS: '1', PORT: String(port) }, stdio: 'ignore' });
+  t.after(() => { child.kill(); fs.rmSync(sandbox, { recursive: true, force: true }); });
+  const base = `http://127.0.0.1:${port}`;
+  let healthy = false;
+  for (let i = 0; i < 50 && !healthy; i += 1) { try { healthy = (await fetch(`${base}/api/health`)).ok; } catch {} if (!healthy) await new Promise(resolve => setTimeout(resolve, 50)); }
+  assert.equal(healthy, true);
+  const blocked = await fetch(`${base}/api/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+  assert.equal(blocked.status, 503);
+  assert.equal(fingerprint(data), before);
+});

@@ -25,6 +25,19 @@ const PORT = process.env.PORT || 3000;
 const SESSION_COOKIE = 'sp_session';
 const SESSION_TTL_MS = 1000 * 60 * 60 * 12; // 12 小时
 
+function deploymentWriteGateOpen() {
+  if (process.env.SP_DEPLOY_READ_ONLY === '1') return false;
+  const stateFile = process.env.SP_DEPLOY_STATE_FILE;
+  if (!stateFile) return true;
+  try {
+    const phase = JSON.parse(fs.readFileSync(stateFile, 'utf8')).phase;
+    return phase === 'normal_active' || phase === 'fallback_active';
+  } catch (error) {
+    // A missing, interrupted, or malformed deployment state must fail closed.
+    return false;
+  }
+}
+
 // ---------- 会话存储（内存版） ----------
 const sessions = new Map();
 function makeSession(userId) {
@@ -125,9 +138,10 @@ app.use(cookieParser());
 // process is strictly read-only: health and static GET requests work, while
 // every state-changing request fails closed.  This flag is only set by the
 // deployment script; normal application operation is unchanged.
-if (process.env.SP_DEPLOY_READ_ONLY === '1') {
+if (process.env.SP_DEPLOY_READ_ONLY === '1' || process.env.SP_DEPLOY_STATE_FILE) {
   app.use((req, res, next) => {
     if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return next();
+    if (deploymentWriteGateOpen()) return next();
     return res.status(503).json({ error: '部署验证中，暂时不接受数据修改' });
   });
 }
@@ -153,10 +167,26 @@ app.use((req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// A validation process must never seed or migrate the shared production data.
-// It only needs read-only health/static checks; the normal process keeps the
-// established initialization and migration behavior.
-if (process.env.SP_DEPLOY_READ_ONLY !== '1') ensureSeeded();
+// A validation process must never seed, migrate, or run reminder jobs against
+// shared data. If an interrupted deployment later clears its persistent gate,
+// initialization resumes only after that explicit state transition.
+let writeEnabledServicesStarted = false;
+function startWriteEnabledServices() {
+  if (writeEnabledServicesStarted || !deploymentWriteGateOpen()) return;
+  writeEnabledServicesStarted = true;
+  ensureSeeded();
+  if (process.env.SP_DISABLE_BACKGROUND_JOBS !== '1') controlReminders.start();
+}
+if (deploymentWriteGateOpen()) {
+  startWriteEnabledServices();
+} else {
+  const waitForWriteGate = setInterval(() => {
+    if (!deploymentWriteGateOpen()) return;
+    clearInterval(waitForWriteGate);
+    startWriteEnabledServices();
+  }, 1000);
+  waitForWriteGate.unref();
+}
 
 // ============ 鉴权 ============
 
@@ -2437,6 +2467,4 @@ app.listen(PORT, () => {
   console.log(`NSS Solar control platform running on http://localhost:${PORT}`);
   if (process.env.SP_ADMIN_PASSWORD) console.log('New administrator bootstrap is using SP_ADMIN_PASSWORD; first login will require a password change.');
   else console.log(`For a new data directory, read ${path.join(store.DATA_DIR, 'INITIAL_ADMIN_CREDENTIALS.txt')} and remove it after completing the forced password change.`);
-  // 启动任务与门店整改逾期提醒（每 15 分钟）
-  if (process.env.SP_DISABLE_BACKGROUND_JOBS !== '1') controlReminders.start();
 });
