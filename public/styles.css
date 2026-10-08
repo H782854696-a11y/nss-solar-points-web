@@ -1422,3 +1422,34 @@ select.filter-input { height: 38px; cursor: pointer; }
 @media (max-width: 1100px) { .cc-dashboard-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .cc-dashboard-panel:first-child { grid-column: 1 / -1; } }
 @media (max-width: 650px) { .cc-dashboard-grid { grid-template-columns: 1fr; } .cc-dashboard-panel:first-child { grid-column: auto; } .cc-quick-actions { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 480px) { .cc-overview-grid { gap: 8px; } .cc-overview-card { padding: 12px; } .cc-overview-card strong { font-size: 22px; } }
+
+/* 当日存款：状态总览与门店清单，移动端使用纵向卡片。 */
+.deposit-header { align-items: center; }
+.deposit-date { color: var(--muted); font-size: 12px; white-space: nowrap; }
+.deposit-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; margin: 16px 0 22px; }
+.deposit-summary .cc-detail-stat { margin: 0; }
+.deposit-progress { min-height: 102px; padding: 16px; display: flex; flex-direction: column; justify-content: center; gap: 8px; }
+.deposit-progress-top { display: flex; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; }
+.deposit-progress-top strong { color: var(--ink); font-size: 21px; line-height: 1; }
+.deposit-progress-track { height: 8px; background: var(--line); border-radius: 99px; overflow: hidden; }
+.deposit-progress-track span { display: block; height: 100%; background: #0e9f6e; border-radius: inherit; }
+.deposit-progress small { color: var(--muted); font-size: 11px; }
+.deposit-panel { padding: 20px; }
+.deposit-panel-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.deposit-panel-head h3 { margin: 0 0 5px; color: var(--ink); font-size: 17px; }
+.deposit-panel-head p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.deposit-filters { display: flex; gap: 8px; flex-wrap: wrap; padding: 18px 0 10px; }
+.deposit-filters .btn.active { color: #fff; border-color: #1d4ed8; background: #1d4ed8; }
+.deposit-list { display: grid; }
+.deposit-row { display: grid; grid-template-columns: minmax(180px,1.1fr) minmax(220px,1.6fr) auto; align-items: center; gap: 16px; padding: 16px 3px; border-bottom: 1px solid var(--line); }
+.deposit-row:last-child { border-bottom: 0; }
+.deposit-store { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.deposit-store-icon { display: grid; place-items: center; flex: 0 0 33px; width: 33px; height: 33px; border-radius: 9px; color: #1d4ed8; background: #eef3ff; font-size: 18px; }
+.deposit-store strong, .deposit-store small, .deposit-state small { display: block; }
+.deposit-store strong { color: var(--ink); font-size: 13px; }
+.deposit-store small, .deposit-state small { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+.deposit-actions { display: flex; gap: 7px; justify-content: flex-end; }
+.deposit-actions .btn { white-space: nowrap; }
+.app-shell[data-theme="dark"] .deposit-store-icon { color: #a3c6ff; background: #1c3b63; }
+@media (max-width: 950px) { .deposit-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); } .deposit-row { grid-template-columns: minmax(150px,1fr) minmax(180px,1fr); } .deposit-actions { grid-column: 1 / -1; justify-content: flex-start; padding-left: 43px; } }
+@media (max-width: 620px) { .deposit-header { align-items: flex-start; flex-direction: column; gap: 7px; } .deposit-summary { gap: 8px; } .deposit-panel { padding: 14px; } .deposit-row { grid-template-columns: 1fr; gap: 10px; } .deposit-actions { grid-column: auto; padding-left: 43px; } .deposit-state { padding-left: 43px; } .deposit-progress { min-height: 100px; } }

@@ -294,6 +294,7 @@ function renderUserBlock() {
  */
 const SCREEN_PERMS = {
   controlCenter: 'workflow.view',
+  dailyDeposits: 'deposit.view',
   approvals: 'approval.view',   // 待审核列表（可见范围由后端按门店/区域收窄）
   stores:    'store.view',      // 门店管理（无此权限的角色，菜单与页面一并不可见）
   mall:      'mall.view',       // 积分商城（renderMall 会无条件请求 /api/products 与 /api/redemptions，
@@ -465,7 +466,7 @@ function bindNavDrawer() {
 /** 各屏 → 顶部栏标题的 i18n key（2026-09-24 浅色改版：顶部栏左侧显示当前页面名） */
 const SCREEN_NAV_KEY = {
   dashboard: 'nav.dashboard', reports: 'nav.reports', storeBiz: 'nav.storeBiz', memberBiz: 'nav.memberBiz',
-  stores: 'nav.stores', members: 'nav.members', rules: 'nav.rules', mall: 'nav.mall',
+  stores: 'nav.stores', dailyDeposits: 'nav.dailyDeposits', members: 'nav.members', rules: 'nav.rules', mall: 'nav.mall',
   approvals: 'nav.approvals', controlCenter: 'nav.controlCenter', sheets: 'nav.sheets', db: 'nav.db', audit: 'nav.audit',
   accounts: 'nav.accounts', account: 'nav.account',
 };
@@ -509,6 +510,7 @@ async function renderScreen() {
     else if (state.screen === 'mall') await renderMall(root);
     else if (state.screen === 'approvals') await renderApprovals(root);
     else if (state.screen === 'controlCenter') await renderControlCenter(root);
+    else if (state.screen === 'dailyDeposits') await renderDailyDeposits(root);
     else if (state.screen === 'sheets') await renderSheets(root);
     else if (state.screen === 'reports') await renderReports(root);
     else if (state.screen === 'storeBiz') await renderStoreBiz(root);
@@ -521,6 +523,55 @@ async function renderScreen() {
     root.innerHTML = `<div class="card"><p>${t('common.loadFailed', { msg: escapeHtml(e.message) })}</p><button class="btn btn-primary" type="button" id="screenRetry">${ccText('Retry', '重试')}</button></div>`;
     root.querySelector('#screenRetry').addEventListener('click', () => { renderScreen(); });
   }
+}
+
+// 当日存款只跟踪门店上报状态，不记录存款金额，也不充当银行到账核验。
+async function renderDailyDeposits(root) {
+  const data = await GET('/api/v2/daily-deposits');
+  const items = Array.isArray(data.items) ? data.items : [];
+  const deposited = items.filter(item => item.status === 'deposited').length;
+  const pending = items.length - deposited;
+  const filter = state.depositFilter || 'all';
+  const visible = items.filter(item => filter === 'all' || (filter === 'deposited' ? item.status === 'deposited' : item.status !== 'deposited'));
+  const phTime = value => value ? new Intl.DateTimeFormat(String(locale()).toLowerCase().startsWith('zh') ? 'zh-CN' : 'en-PH', { timeZone: 'Asia/Manila', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(new Date(value)) : '';
+  const percent = items.length ? Math.round(deposited / items.length * 100) : 0;
+  root.innerHTML = `
+    <div class="page-header deposit-header"><div class="page-header-text"><div class="page-title">${ccText('Daily Bank Deposits', '当日存款')}</div><div class="page-subtitle">${ccText('Track each store’s deposit report before closing time', '查看各门店下班前的存款上报进度')}</div></div><span class="deposit-date">${escapeHtml(data.date)} · ${ccText('Philippines time', '菲律宾时间')}</span></div>
+    <section class="deposit-summary" aria-label="${ccText('Deposit progress', '存款进度')}">
+      ${uiStat(ccText('Stores', '门店总数'), items.length, 'brand')}
+      ${uiStat(ccText('Deposited', '已存款'), deposited, 'success')}
+      ${uiStat(ccText('Not deposited', '未存款'), pending, 'warning')}
+      <div class="card deposit-progress"><div class="deposit-progress-top"><span>${ccText('Today’s progress', '今日进度')}</span><strong>${percent}%</strong></div><div class="deposit-progress-track"><span style="width:${percent}%"></span></div><small>${deposited} / ${items.length} ${ccText('stores reported', '家门店已上报')}</small></div>
+    </section>
+    <section class="card deposit-panel">
+      <div class="deposit-panel-head"><div><h3>${ccText('Store deposit status', '各门店存款状态')}</h3><p>${ccText('“Deposited” means the store reported completion. Confirm bank receipt in your banking system.', '“已存款”为门店上报状态；银行实际到账请以银行系统为准。')}</p></div><button type="button" class="btn btn-sm" id="depositRefresh">${ccText('Refresh', '刷新状态')}</button></div>
+      <div class="deposit-filters" role="group" aria-label="${ccText('Filter status', '筛选状态')}">
+        ${[['all',ccText('All', '全部')],['not_deposited',ccText('Not deposited', '未存款')],['deposited',ccText('Deposited', '已存款')]].map(([value,label]) => `<button type="button" class="btn btn-sm ${filter === value ? 'active' : ''}" data-deposit-filter="${value}">${label}</button>`).join('')}
+      </div>
+      <div class="deposit-list">${visible.length ? visible.map(item => {
+        const done = item.status === 'deposited';
+        const canRemind = data.canRemind && !done;
+        const canSubmit = data.canSubmit && can('deposit.submit') && !done;
+        return `<article class="deposit-row"><div class="deposit-store"><span class="deposit-store-icon" aria-hidden="true">▣</span><div><strong>${escapeHtml(tStore(item.storeName))}</strong><small>${escapeHtml(item.storeCode || '')}${item.storeCode ? ' · ' : ''}${ccText('Manager', '店长')}：${escapeHtml(item.managerName || ccText('Unassigned', '未分配'))}</small></div></div><div class="deposit-state"><span class="cc-status cc-status-${done ? 'success' : 'warning'}"><i></i>${done ? ccText('Deposited', '已存款') : ccText('Not deposited', '未存款')}</span>${done ? `<small>${ccText('Reported', '上报')} ${escapeHtml(phTime(item.reportedAt))} · ${escapeHtml(item.reportedByName || '')}${item.bankName ? ` · ${escapeHtml(item.bankName)}` : ''}${item.reference ? ` · ${ccText('Reference', '凭证号')} ${escapeHtml(item.reference)}` : ''}</small>` : item.lastReminderAt ? `<small>${ccText('Reminded', '已提醒')} ${escapeHtml(phTime(item.lastReminderAt))} · ${ccText('Times', '次数')} ${Number(item.reminderCount || 0)}</small>` : `<small>${ccText('Awaiting store confirmation', '等待门店确认')}</small>`}</div><div class="deposit-actions">${canRemind ? `<button type="button" class="btn btn-sm" data-deposit-remind="${escapeHtml(item.storeId)}" ${!item.hasManager ? `disabled title="${ccText('Assign a store manager first', '请先绑定店长账号')}"` : ''}>${item.lastReminderAt ? ccText('Remind again', '再次提醒') : ccText('Remind manager', '提醒店长')}</button>` : ''}${canSubmit ? `<button type="button" class="btn btn-sm btn-primary" data-deposit-confirm="${escapeHtml(item.storeId)}">${ccText('Confirm deposit', '确认已存款')}</button>` : ''}</div></article>`;
+      }).join('') : `<div class="cc-empty-state"><strong>${items.length ? ccText('No stores match this filter', '此筛选条件下没有门店') : ccText('No stores available', '暂无可查看的门店')}</strong></div>`}</div>
+    </section>`;
+  root.querySelector('#depositRefresh')?.addEventListener('click', () => renderDailyDeposits(root));
+  root.querySelectorAll('[data-deposit-filter]').forEach(button => button.addEventListener('click', () => { state.depositFilter = button.dataset.depositFilter; renderDailyDeposits(root); }));
+  root.querySelectorAll('[data-deposit-remind]').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true;
+    try { await POST(`/api/v2/daily-deposits/${encodeURIComponent(button.dataset.depositRemind)}/remind`, {}); toast(ccText('Reminder sent to the store manager', '已向店长发送待办提醒'), 'success'); await renderDailyDeposits(root); }
+    catch (error) { button.disabled = false; toast(error.message, 'error'); }
+  }));
+  root.querySelectorAll('[data-deposit-confirm]').forEach(button => button.addEventListener('click', () => {
+    const item = items.find(entry => entry.storeId === button.dataset.depositConfirm);
+    if (!item) return;
+    const modal = openModal({ title: ccText('Confirm bank deposit', '确认当日存款'), body: `<form id="depositConfirmForm" class="cc-form-grid"><p class="cc-meta cc-wide">${escapeHtml(tStore(item.storeName))} · ${escapeHtml(data.date)}<br>${ccText('This reports that the store has deposited cash. It does not verify bank settlement.', '此操作记录门店已办理存款，不代表银行到账核验。')}</p><label class="cc-field"><span>${ccText('Bank (optional)', '存款银行（选填）')}</span><input name="bankName" maxlength="120"/></label><label class="cc-field"><span>${ccText('Receipt or reference (optional)', '存款凭证号（选填）')}</span><input name="reference" maxlength="120"/></label><label class="cc-field cc-wide"><span>${ccText('Note (optional)', '备注（选填）')}</span><textarea name="note" maxlength="500" rows="2"></textarea></label></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="depositConfirmSubmit">${ccText('Confirm deposited', '确认已存款')}</button>`, wide: true });
+    modal.querySelector('#depositConfirmSubmit')?.addEventListener('click', async event => {
+      event.target.disabled = true;
+      try { await POST(`/api/v2/daily-deposits/${encodeURIComponent(item.storeId)}/confirm`, Object.fromEntries(new FormData(modal.querySelector('#depositConfirmForm')).entries())); closeModal(); toast(ccText('Deposit reported', '存款状态已上报'), 'success'); await renderDailyDeposits(root); }
+      catch (error) { event.target.disabled = false; toast(error.message, 'error'); }
+    });
+  }));
 }
 
 // =================== 积分审核（2026-09-19 上线） ===================
@@ -995,6 +1046,7 @@ async function renderControlCenter(root) {
     </article>`;
   }).join('');
   const taskCards = tasks.map(x => {
+    if (x.kind === 'daily_deposit') return `<article class="card cc-card" data-task-card data-task-status="${escapeHtml(x.status)}" data-task-priority="${escapeHtml(x.priority || 'high')}" data-task-store="${escapeHtml(x.storeId || '')}" data-task-search="${escapeHtml(x.title)}"><div class="cc-card-top"><strong>${ccText('Daily deposit reminder', '当日存款待办')} · ${escapeHtml(x.title)}</strong>${ccStatusBadge(x.status)}</div><div class="cc-meta">${escapeHtml(x.assigneeName || '')} · ${escapeHtml(x.depositDate || '')}</div><p>${ccText('Confirm the bank deposit in Daily Bank Deposits. The task closes automatically.', '请在「当日存款」页面确认，待办将自动完成。')}</p><button type="button" class="btn btn-sm btn-primary" data-deposit-open>${ccText('Open daily deposits', '前往当日存款')}</button></article>`;
     const checklist = Array.isArray(x.checklist) ? x.checklist : [];
     const comments = Array.isArray(x.comments) ? x.comments : [];
     const attachments = Array.isArray(x.attachments) ? x.attachments : [];
@@ -1550,6 +1602,7 @@ async function renderControlCenter(root) {
     } catch (err) { toast(err.message, 'error'); }
   }));
   $$('[data-task-complete]', root).forEach(btn => btn.addEventListener('click', async () => { try { await POST(`/api/v2/tasks/${encodeURIComponent(btn.dataset.taskComplete)}/complete`, {}); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } }));
+  $$('[data-deposit-open]', root).forEach(btn => btn.addEventListener('click', () => setScreen('dailyDeposits')));
   $$('[data-task-edit]', root).forEach(btn => btn.addEventListener('click', () => {
     const task = tasks.find(x => x.id === btn.dataset.taskEdit); if (!task) return;
     const modal = openModal({ title: ccText('Edit task', '编辑任务'), body: `<form id="ccTaskEdit" class="cc-form-grid"><label class="cc-field cc-wide"><span>${ccText('Task title', '任务名称')}</span><input name="title" required maxlength="180" value="${escapeHtml(task.title)}"/></label><label class="cc-field"><span>${ccText('Priority', '优先级')}</span><select name="priority">${[['low','低'],['normal','普通'],['high','高'],['urgent','紧急']].map(([v,l]) => `<option value="${v}" ${v === task.priority ? 'selected' : ''}>${ccText(v, l)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Due date', '截止日期')}</span><input type="date" name="dueAt" value="${escapeHtml(task.dueAt ? task.dueAt.slice(0,10) : '')}"/></label><label class="cc-field"><span>${ccText('Status', '状态')}</span><select name="status"><option value="open" ${task.status === 'open' ? 'selected' : ''}>${ccText('Open', '待处理')}</option><option value="in_progress" ${task.status === 'in_progress' ? 'selected' : ''}>${ccText('In progress', '进行中')}</option></select></label>${can('task.assign') ? `<label class="cc-field"><span>${ccText('Assignee', '负责人')}</span><select name="assigneeId"><option value="">${ccText('Unassigned', '暂不指派')}</option>${assignees.map(a => `<option value="${escapeHtml(a.id)}" ${a.id === task.assigneeId ? 'selected' : ''}>${escapeHtml(a.name)}</option>`).join('')}</select></label>` : ''}<label class="cc-field cc-wide"><span>${ccText('Description', '任务说明')}</span><textarea name="description" rows="3">${escapeHtml(task.description || '')}</textarea></label></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccTaskSave">${ccText('Save', '保存')}</button>`, wide: true });

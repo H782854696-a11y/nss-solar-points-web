@@ -659,6 +659,7 @@ const DB_COLLECTIONS = [
   { key: 'users',        label: '账号',        kind: 'array',  desc: '登录账号（密码已打码）', sensitive: ['password'] },
   { key: 'workflowInstances', label: '审批流程', kind: 'array', desc: '管理流程实例' },
   { key: 'tasks',        label: '协作任务',    kind: 'array', desc: '任务与执行记录' },
+  { key: 'dailyDeposits', label: '当日存款记录', kind: 'array', desc: '门店每日存款上报记录（不含金额）' },
   { key: 'announcements', label: '内容公告', kind: 'array', desc: '中控公告' },
   { key: 'audit',        label: '操作审计日志', kind: 'lines',  desc: '服务器操作日志（倒序）' },
 ];
@@ -672,6 +673,7 @@ const DB_FIELD_LABELS = {
   stores: { name: '门店名', city: '城市', address: '地址', phone: '电话', managerId: '店长ID', managerName: '店长姓名' },
   transactions: { memberId: '会员ID', memberName: '会员姓名', type: '类型', amount: '积分变动', reason: '原因', storeId: '门店ID', storeName: '门店名', operatorId: '操作人ID', operatorName: '操作人', purchaseAmount: '消费金额(₱)', basePoints: '计分基数', balanceAfter: '变动后余额' },
   users: { username: '账号', password: '密码', name: '姓名', role: '角色', storeId: '绑定门店ID', phone: '手机号', disabled: '已停用', disabledAt: '停用时间' },
+  dailyDeposits: { storeId: '门店ID', depositDate: '存款日期', status: '上报状态', bankName: '存款银行', reference: '凭证号', note: '备注', reportedByName: '上报人', reportedAt: '上报时间' },
   rules: { spendPerPoint: '每多少₱积1分', expiryMonths: '有效期(月)', welcomeBonus: '欢迎积分', redeemRatio: '兑换比例', redeemMaxPercent: '抵扣上限(%)', redeemMinPoints: '最低使用门槛', requireConfirm: '二次确认', realtimePush: '实时推送', levels: '等级配置', b2bTiers: 'B2B阶梯' },
   sheets: { enabled: '启用', spreadsheetId: 'Google Sheet ID', gasUrl: 'Apps Script URL', autoSync: '自动同步', autoSyncInterval: '心跳间隔(分钟)', lastSyncAt: '上次同步时间', lastSyncResult: '上次结果', lastSyncSource: '触发方式', lastSyncSummary: '同步内容', lastSyncCostMs: '耗时(ms)', lastSyncFailedAt: '上次失败时间', lastError: '错误信息', syncCount: '累计同步次数', lastAction: '最后动作', lastActionStatus: '动作结果', secret: '密钥' },
   audit: { _line: '行号', text: '日志内容' },
@@ -1012,6 +1014,93 @@ function notifyUser(userId, type, title, body, resourceType, resourceId) {
   items.unshift({ id: nanoid(), userId, type, title, body, resourceType, resourceId, readAt: null, createdAt: nowIso() });
   writeAll('notifications', items.slice(0, 20000));
 }
+const manilaDayFormatter = new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' });
+function manilaToday() {
+  const parts = Object.fromEntries(manilaDayFormatter.formatToParts(new Date()).map(part => [part.type, part.value]));
+  return `${parts.year}-${parts.month}-${parts.day}`;
+}
+function depositResource(storeItem) {
+  const indexes = countryIndexes();
+  return { storeId: storeItem.id, regionId: storeItem.regionId || null, country: countryOf(storeItem, indexes.regionIndex, indexes.storeIndex, indexes.orgIndex) };
+}
+
+// A confirmation is a manager's report, not bank reconciliation. No amount or ledger data is copied here.
+app.get('/api/v2/daily-deposits', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'deposit.view')) return;
+  const date = manilaToday();
+  const users = readAll('users') || [], deposits = readAll('dailyDeposits') || [], tasks = readAll('tasks') || [];
+  const items = (readAll('stores') || [])
+    .filter(item => { const resource = depositResource(item); return resource.country === 'PH' && rbac.can(u, 'deposit.view', resource); })
+    .map(item => {
+      const manager = users.find(user => user.id === item.managerId && !user.disabled && rbac.normalizeRole(user.role) === 'store_manager' && user.storeId === item.id);
+      const deposit = deposits.find(entry => entry.storeId === item.id && entry.depositDate === date && entry.status === 'reported');
+      const reminder = tasks.find(task => task.kind === 'daily_deposit' && task.storeId === item.id && task.depositDate === date);
+      return {
+        storeId: item.id, storeName: item.name, storeCode: item.storeCode || '', regionId: item.regionId || null,
+        managerName: manager?.name || manager?.username || item.managerName || '', hasManager: !!manager,
+        status: deposit ? 'deposited' : 'not_deposited',
+        reportedAt: deposit?.reportedAt || null, reportedByName: deposit?.reportedByName || null,
+        bankName: deposit?.bankName || '', reference: deposit?.reference || '', note: deposit?.note || '',
+        reminderCount: Number(reminder?.reminderCount || 0), lastReminderAt: reminder?.lastReminderAt || null,
+        reminderTaskId: reminder?.status === 'open' ? reminder.id : null,
+      };
+    });
+  res.json({ date, timezone: 'Asia/Manila', items, canRemind: rbac.hasPermission(u, 'deposit.remind'), canSubmit: rbac.hasPermission(u, 'deposit.submit') });
+});
+
+app.post('/api/v2/daily-deposits/:storeId/remind', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const linkedStore = (readAll('stores') || []).find(item => item.id === req.params.storeId);
+  if (!linkedStore) return res.status(404).json({ error: '门店不存在' });
+  const resource = depositResource(linkedStore);
+  if (resource.country !== 'PH') return res.status(409).json({ error: '当日存款仅适用于菲律宾门店' });
+  if (!guard.check(req, res, 'deposit.remind', resource)) return;
+  const date = manilaToday();
+  if ((readAll('dailyDeposits') || []).some(item => item.storeId === linkedStore.id && item.depositDate === date && item.status === 'reported')) return res.status(409).json({ error: '该门店今天已上报存款' });
+  const manager = (readAll('users') || []).find(user => user.id === linkedStore.managerId && !user.disabled && rbac.normalizeRole(user.role) === 'store_manager' && user.storeId === linkedStore.id);
+  if (!manager) return res.status(409).json({ error: '该门店尚无有效店长账号，请先绑定店长' });
+  const tasks = readAll('tasks') || [];
+  let task = tasks.find(item => item.kind === 'daily_deposit' && item.storeId === linkedStore.id && item.depositDate === date);
+  const now = nowIso();
+  if (task?.lastReminderAt && Date.now() - Date.parse(task.lastReminderAt) < 10 * 60 * 1000) return res.status(429).json({ error: '10 分钟内已提醒过该店长，请稍后再试' });
+  if (!task) {
+    task = { id: nanoid(), kind: 'daily_deposit', depositDate: date, title: `Daily deposit / 当日存款 · ${linkedStore.name}`, description: 'Deposit at the bank before closing, then confirm in Daily Bank Deposits. / 请在下班前办理银行存款并在「当日存款」确认。', status: 'open', priority: 'high', assigneeId: manager.id, assigneeName: manager.name || manager.username, storeId: linkedStore.id, warehouseId: null, regionId: linkedStore.regionId || null, country: resource.country, dueAt: `${date}T15:59:59.000Z`, createdBy: u.id, createdByName: u.name || u.username, createdAt: now, updatedAt: now, completedAt: null, overdueReminderAt: null, checklist: [], comments: [], attachments: [], lastReminderAt: now, reminderCount: 1 };
+    tasks.unshift(task);
+  } else {
+    task.assigneeId = manager.id; task.assigneeName = manager.name || manager.username;
+    task.status = 'open'; task.updatedAt = now; task.lastReminderAt = now;
+    task.reminderCount = Number(task.reminderCount || 0) + 1;
+  }
+  writeAll('tasks', tasks);
+  notifyUser(manager.id, 'daily_deposit.reminder', 'Daily deposit reminder / 今日存款提醒', `Please deposit for ${linkedStore.name} before closing and confirm in Daily Bank Deposits. / 请在下班前完成银行存款并在「当日存款」确认。`, 'task', task.id);
+  recordControlAudit(req, u, 'daily_deposit.remind', 'dailyDeposit', `${date}:${linkedStore.id}`, { storeId: linkedStore.id, managerId: manager.id, reminderCount: task.reminderCount });
+  res.json({ ok: true, taskId: task.id, reminderCount: task.reminderCount, lastReminderAt: now });
+});
+
+app.post('/api/v2/daily-deposits/:storeId/confirm', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const linkedStore = (readAll('stores') || []).find(item => item.id === req.params.storeId);
+  if (!linkedStore) return res.status(404).json({ error: '门店不存在' });
+  const resource = depositResource(linkedStore);
+  if (resource.country !== 'PH') return res.status(409).json({ error: '当日存款仅适用于菲律宾门店' });
+  if (!guard.check(req, res, 'deposit.submit', resource)) return;
+  const date = manilaToday(), deposits = readAll('dailyDeposits') || [];
+  if (deposits.some(item => item.storeId === linkedStore.id && item.depositDate === date)) return res.status(409).json({ error: '该门店今天已确认存款，请勿重复提交' });
+  const now = nowIso();
+  const item = { id: nanoid(), storeId: linkedStore.id, regionId: linkedStore.regionId || null, country: resource.country, depositDate: date, status: 'reported', bankName: controlCenter.cleanText(req.body?.bankName, 120), reference: controlCenter.cleanText(req.body?.reference, 120), note: controlCenter.cleanText(req.body?.note, 500), reportedBy: u.id, reportedByName: u.name || u.username, reportedAt: now, createdAt: now, updatedAt: now };
+  deposits.unshift(item); writeAll('dailyDeposits', deposits);
+  const tasks = readAll('tasks') || [], creators = new Set();
+  let tasksChanged = false;
+  for (const task of tasks) if (task.kind === 'daily_deposit' && task.storeId === linkedStore.id && task.depositDate === date && !['completed','cancelled'].includes(task.status)) {
+    task.status = 'completed'; task.completedAt = now; task.updatedAt = now; tasksChanged = true;
+    if (task.createdBy && task.createdBy !== u.id) creators.add(task.createdBy);
+  }
+  if (tasksChanged) writeAll('tasks', tasks);
+  for (const creator of creators) notifyUser(creator, 'daily_deposit.confirmed', '门店已上报当日存款', linkedStore.name, 'dailyDeposit', item.id);
+  recordControlAudit(req, u, 'daily_deposit.confirm', 'dailyDeposit', item.id, { storeId: item.storeId, depositDate: date });
+  res.status(201).json({ item });
+});
 function approvalSlotsForUser(instance, user) {
   const step = (instance.approvalSteps || [])[instance.currentStep];
   if (!step || !user) return [];
@@ -2066,6 +2155,7 @@ app.post('/api/v2/tasks/:id/complete', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const items = readAll('tasks') || [], item = items.find(x => x.id === req.params.id);
   if (!item) return res.status(404).json({ error: '任务不存在' });
+  if (item.kind === 'daily_deposit') return res.status(409).json({ error: '请在「当日存款」页面确认，存款待办会自动完成' });
   if (!canActOnTask(req, res, 'task.close', item)) return;
   if (!['open','in_progress'].includes(item.status)) return res.status(409).json({ error: '该任务已处理' });
   const checklist = Array.isArray(item.checklist) ? item.checklist : [];
@@ -2078,6 +2168,7 @@ app.post('/api/v2/tasks/:id/checklist/:itemId', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const items = readAll('tasks') || [], item = items.find(x => x.id === req.params.id);
   if (!item) return res.status(404).json({ error: '任务不存在' });
+  if (item.kind === 'daily_deposit') return res.status(409).json({ error: '存款待办不能修改清单' });
   if (!canActOnTask(req, res, 'task.close', item)) return;
   if (!['open','in_progress'].includes(item.status)) return res.status(409).json({ error: '已处理的任务不能修改清单' });
   if (typeof req.body?.completed !== 'boolean') return res.status(400).json({ error: '清单状态无效' });
@@ -2098,6 +2189,7 @@ app.put('/api/v2/tasks/:id', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const items = readAll('tasks') || [], item = items.find(x => x.id === req.params.id);
   if (!item) return res.status(404).json({ error: '任务不存在' });
+  if (item.kind === 'daily_deposit') return res.status(409).json({ error: '请在「当日存款」页面处理该待办' });
   if (!guard.check(req, res, 'task.edit', item)) return;
   const b = req.body || {};
   if (b.warehouseId !== undefined) return res.status(400).json({ error: '当前版本不再将任务关联到仓库档案' });

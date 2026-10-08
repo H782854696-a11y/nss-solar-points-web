@@ -90,6 +90,8 @@
     'nav.groupSystemAudit': ['SYSTEM & AUDIT', '系统与审计'],
     'nav.workspaceApprovals': ['Approval Center', '审批中心'],
     'nav.workspaceTasks': ['Tasks & Collab', '任务协作'],
+    'nav.dailyDeposits': ['Daily Bank Deposits', '当日存款'],
+    '当日存款记录': ['Daily deposit reports', '当日存款记录'],
     'nav.workspaceStoreOps': ['Store Follow-up', '门店跟进'],
     'nav.workspaceAnnouncements': ['Announcements', '内容公告'],
     'nav.workspaceGovernance': ['Org & Workflow Setup', '组织与流程设置'],
