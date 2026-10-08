@@ -676,7 +676,7 @@ const DB_FIELD_LABELS = {
   stores: { name: '门店名', city: '城市', address: '地址', phone: '电话', managerId: '店长ID', managerName: '店长姓名' },
   transactions: { memberId: '会员ID', memberName: '会员姓名', type: '类型', amount: '积分变动', reason: '原因', storeId: '门店ID', storeName: '门店名', operatorId: '操作人ID', operatorName: '操作人', purchaseAmount: '消费金额(₱)', basePoints: '计分基数', balanceAfter: '变动后余额' },
   users: { username: '账号', password: '密码', name: '姓名', role: '角色', storeId: '绑定门店ID', phone: '手机号', disabled: '已停用', disabledAt: '停用时间' },
-  dailyDeposits: { storeId: '门店ID', depositDate: '存款日期', status: '上报状态', bankName: '存款银行', reference: '凭证号', note: '备注', reportedByName: '上报人', reportedAt: '上报时间' },
+  dailyDeposits: { storeId: '门店ID', depositDate: '存款日期', status: '上报状态', receipt: '存款凭证图片', reportedByName: '上报人', reportedAt: '上报时间' },
   rules: { spendPerPoint: '每多少₱积1分', expiryMonths: '有效期(月)', welcomeBonus: '欢迎积分', redeemRatio: '兑换比例', redeemMaxPercent: '抵扣上限(%)', redeemMinPoints: '最低使用门槛', requireConfirm: '二次确认', realtimePush: '实时推送', levels: '等级配置', b2bTiers: 'B2B阶梯' },
   sheets: { enabled: '启用', spreadsheetId: 'Google Sheet ID', gasUrl: 'Apps Script URL', autoSync: '自动同步', autoSyncInterval: '心跳间隔(分钟)', lastSyncAt: '上次同步时间', lastSyncResult: '上次结果', lastSyncSource: '触发方式', lastSyncSummary: '同步内容', lastSyncCostMs: '耗时(ms)', lastSyncFailedAt: '上次失败时间', lastError: '错误信息', syncCount: '累计同步次数', lastAction: '最后动作', lastActionStatus: '动作结果', secret: '密钥' },
   audit: { _line: '行号', text: '日志内容' },
@@ -1044,7 +1044,7 @@ app.get('/api/v2/daily-deposits', (req, res) => {
         managerName: manager?.name || manager?.username || item.managerName || '', hasManager: !!manager,
         status: deposit ? 'deposited' : 'not_deposited',
         reportedAt: deposit?.reportedAt || null, reportedByName: deposit?.reportedByName || null,
-        bankName: deposit?.bankName || '', reference: deposit?.reference || '', note: deposit?.note || '',
+        receipt: deposit?.receipt ? { id: deposit.receipt.id, name: deposit.receipt.name, mimeType: deposit.receipt.mimeType, size: deposit.receipt.size, uploadedAt: deposit.receipt.uploadedAt } : null,
         reminderCount: Number(reminder?.reminderCount || 0), lastReminderAt: reminder?.lastReminderAt || null,
         reminderTaskId: reminder?.status === 'open' ? reminder.id : null,
       };
@@ -1081,6 +1081,24 @@ app.post('/api/v2/daily-deposits/:storeId/remind', (req, res) => {
   res.json({ ok: true, taskId: task.id, reminderCount: task.reminderCount, lastReminderAt: now });
 });
 
+const dailyDepositAttachmentDir = path.join(store.DATA_DIR, 'uploads', 'daily-deposits');
+const dailyDepositImageTypes = {
+  'image/png': { ext: '.png', signature: b => b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) },
+  'image/jpeg': { ext: '.jpg', signature: b => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+};
+function parseDailyDepositReceipt(raw) {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: '请上传 JPG、JPEG 或 PNG 格式的存款凭证图片' };
+  const mimeType = String(raw.mimeType || '').toLowerCase();
+  const type = dailyDepositImageTypes[mimeType];
+  const name = path.basename(String(raw.fileName || '')).replace(/[\\/\r\n\0]/g, '_').slice(0, 180);
+  if (!type || !name || !/\.(png|jpe?g)$/i.test(name)) return { error: '仅支持 JPG、JPEG 或 PNG 格式的存款凭证图片' };
+  if (typeof raw.data !== 'string' || raw.data.length > 7_000_000) return { error: '存款凭证图片不能超过 5MB' };
+  const match = raw.data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
+  if (!match || match[1].toLowerCase() !== mimeType) return { error: '存款凭证上传格式无效' };
+  const buffer = Buffer.from(match[2], 'base64');
+  if (!buffer.length || buffer.length > 5 * 1024 * 1024 || !type.signature(buffer)) return { error: '图片内容与格式不匹配，或图片超过 5MB' };
+  return { value: { name, mimeType, ext: type.ext, buffer } };
+}
 app.post('/api/v2/daily-deposits/:storeId/confirm', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const linkedStore = (readAll('stores') || []).find(item => item.id === req.params.storeId);
@@ -1090,9 +1108,19 @@ app.post('/api/v2/daily-deposits/:storeId/confirm', (req, res) => {
   if (!guard.check(req, res, 'deposit.submit', resource)) return;
   const date = manilaToday(), deposits = readAll('dailyDeposits') || [];
   if (deposits.some(item => item.storeId === linkedStore.id && item.depositDate === date)) return res.status(409).json({ error: '该门店今天已确认存款，请勿重复提交' });
+  const parsedReceipt = parseDailyDepositReceipt(req.body?.receipt);
+  if (parsedReceipt.error) return res.status(400).json({ error: parsedReceipt.error });
   const now = nowIso();
-  const item = { id: nanoid(), storeId: linkedStore.id, regionId: linkedStore.regionId || null, country: resource.country, depositDate: date, status: 'reported', bankName: controlCenter.cleanText(req.body?.bankName, 120), reference: controlCenter.cleanText(req.body?.reference, 120), note: controlCenter.cleanText(req.body?.note, 500), reportedBy: u.id, reportedByName: u.name || u.username, reportedAt: now, createdAt: now, updatedAt: now };
-  deposits.unshift(item); writeAll('dailyDeposits', deposits);
+  const receiptId = nanoid(), receipt = { id: receiptId, name: parsedReceipt.value.name, mimeType: parsedReceipt.value.mimeType, size: parsedReceipt.value.buffer.length, storedName: `${receiptId}${parsedReceipt.value.ext}`, uploadedAt: now };
+  const item = { id: nanoid(), storeId: linkedStore.id, regionId: linkedStore.regionId || null, country: resource.country, depositDate: date, status: 'reported', receipt, reportedBy: u.id, reportedByName: u.name || u.username, reportedAt: now, createdAt: now, updatedAt: now };
+  try {
+    fs.mkdirSync(dailyDepositAttachmentDir, { recursive: true, mode: 0o700 }); fs.chmodSync(dailyDepositAttachmentDir, 0o700);
+    fs.writeFileSync(path.join(dailyDepositAttachmentDir, receipt.storedName), parsedReceipt.value.buffer, { mode: 0o600, flag: 'wx' });
+    deposits.unshift(item); writeAll('dailyDeposits', deposits);
+  } catch (err) {
+    try { fs.unlinkSync(path.join(dailyDepositAttachmentDir, receipt.storedName)); } catch (cleanupError) {}
+    return res.status(500).json({ error: '保存存款凭证失败，请重试' });
+  }
   const tasks = readAll('tasks') || [], creators = new Set();
   let tasksChanged = false;
   for (const task of tasks) if (task.kind === 'daily_deposit' && task.storeId === linkedStore.id && task.depositDate === date && !['completed','cancelled'].includes(task.status)) {
@@ -1102,7 +1130,21 @@ app.post('/api/v2/daily-deposits/:storeId/confirm', (req, res) => {
   if (tasksChanged) writeAll('tasks', tasks);
   for (const creator of creators) notifyUser(creator, 'daily_deposit.confirmed', '门店已上报当日存款', linkedStore.name, 'dailyDeposit', item.id);
   recordControlAudit(req, u, 'daily_deposit.confirm', 'dailyDeposit', item.id, { storeId: item.storeId, depositDate: date });
-  res.status(201).json({ item });
+  res.status(201).json({ item: { ...item, receipt: { ...receipt, storedName: undefined } } });
+});
+app.get('/api/v2/daily-deposits/:storeId/receipt', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const linkedStore = (readAll('stores') || []).find(item => item.id === req.params.storeId);
+  if (!linkedStore) return res.status(404).json({ error: '门店不存在' });
+  const resource = depositResource(linkedStore);
+  if (!guard.check(req, res, 'deposit.view', resource)) return;
+  const deposit = (readAll('dailyDeposits') || []).find(item => item.storeId === linkedStore.id && item.depositDate === manilaToday() && item.status === 'reported');
+  const receipt = deposit?.receipt;
+  if (!receipt || !dailyDepositImageTypes[receipt.mimeType] || !/^[A-Za-z0-9_-]+\.(png|jpg)$/.test(receipt.storedName || '')) return res.status(404).json({ error: '存款凭证不存在' });
+  const filePath = path.join(dailyDepositAttachmentDir, receipt.storedName);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: '存款凭证文件不存在' });
+  res.set({ 'Content-Type': receipt.mimeType, 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
+  res.sendFile(filePath);
 });
 function approvalSlotsForUser(instance, user) {
   const step = (instance.approvalSteps || [])[instance.currentStep];
