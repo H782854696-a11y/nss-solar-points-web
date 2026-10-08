@@ -4,7 +4,7 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 {contract|data-floor|rollback-allowed|safe-switch|backup|manifest} ..." >&2
+  echo "Usage: $0 {contract|data-floor|rollback-allowed|safe-switch|backup|manifest|state|can-resume-writes} ..." >&2
   exit 2
 }
 
@@ -94,6 +94,46 @@ write_manifest() {
   ' "$output" "$release_id" "$source_sha" "$deployed_at" "$compatibility" "$fallback" "$backup_file" "$backup_sha"
 }
 
+write_state() {
+  local output="$1" phase="$2" release_path="$3" source_sha="$4" compatibility="$5" fallback="$6" reason="$7"
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const [output, phase, releasePath, sourceSha, compatibility, fallback, reason] = process.argv.slice(1);
+    const record = { phase, releasePath, sourceSha, dataCompatibility: compatibility, rollbackTarget: fallback || null,
+      reason: reason || null, updatedAt: new Date().toISOString(), requiresManualWriteResume: phase !== "normal_active" && phase !== "fallback_active" };
+    const temporary = `${output}.tmp-${process.pid}`;
+    fs.writeFileSync(temporary, JSON.stringify(record, null, 2) + "\n", { mode: 0o600 });
+    fs.renameSync(temporary, output);
+  ' "$output" "$phase" "$release_path" "$source_sha" "$compatibility" "$fallback" "$reason"
+}
+
+can_resume_writes() {
+  local state_file="$1" current_release="$2" data_dir="$3"
+  node -e '
+    const fs = require("fs"), path = require("path");
+    const [stateFile, currentRelease, dataDir] = process.argv.slice(1);
+    try {
+      const state = JSON.parse(fs.readFileSync(stateFile, "utf8"));
+      const contract = JSON.parse(fs.readFileSync(path.join(currentRelease, "deploy/release-contract.json"), "utf8")).dataCompatibility;
+      const deposits = path.join(dataDir, "dailyDeposits.json");
+      let floor = "daily-deposit-legacy-v0";
+      if (fs.existsSync(path.join(dataDir, "_storage.json"))) throw new Error("storage driver is not JSON");
+      if (fs.existsSync(deposits)) {
+        const rows = JSON.parse(fs.readFileSync(deposits, "utf8"));
+        if (!Array.isArray(rows)) throw new Error("daily deposits are invalid");
+        if (rows.some(row => ["pending_review", "rejected", "confirmed"].includes(row && row.status))) floor = "daily-deposit-review-v1";
+      }
+      if (state.phase !== "live_read_only_healthy") throw new Error(`phase ${state.phase} requires manual investigation`);
+      if (path.resolve(state.releasePath) !== path.resolve(currentRelease)) throw new Error("current release differs from recorded candidate");
+      if (state.dataCompatibility !== contract) throw new Error("recorded compatibility differs from current release");
+      if (floor === "daily-deposit-review-v1" && contract !== floor) throw new Error("candidate cannot read current data floor");
+      process.stdout.write("allowed: an administrator may explicitly resume writes");
+    } catch (error) {
+      process.stderr.write(`refused: ${error.message}\n`); process.exit(1);
+    }
+  ' "$state_file" "$current_release" "$data_dir"
+}
+
 [[ "$#" -ge 1 ]] || usage
 command="$1"; shift
 case "$command" in
@@ -103,5 +143,7 @@ case "$command" in
   safe-switch) [[ "$#" == 3 ]] || usage; safe_switch "$1" "$2" "$3" ;;
   backup) [[ "$#" == 3 ]] || usage; create_backup "$1" "$2" "$3" ;;
   manifest) [[ "$#" == 8 ]] || usage; write_manifest "$@" ;;
+  state) [[ "$#" == 7 ]] || usage; write_state "$@" ;;
+  can-resume-writes) [[ "$#" == 3 ]] || usage; can_resume_writes "$@" ;;
   *) usage ;;
 esac

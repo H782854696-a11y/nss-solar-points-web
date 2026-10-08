@@ -78,3 +78,25 @@ test('release manifest records SHA, time, compatibility, fallback, and backup ch
   const record = JSON.parse(fs.readFileSync(output));
   assert.strictEqual(record.sourceSha, 'abc123'); assert.strictEqual(record.dataCompatibility, 'daily-deposit-review-v1'); assert.strictEqual(record.rollbackTarget, '/releases/previous');
 });
+
+test('only a recorded healthy read-only candidate can be manually cleared to resume writes', () => {
+  const root = temp(); const candidate = makeRelease(root, 'candidate', 'daily-deposit-review-v1');
+  const data = path.join(root, 'data'); writeDeposits(data, ['pending_review']); const state = path.join(root, 'active-state.json');
+  run('state', state, 'live_read_only_healthy', candidate, 'abc123', 'daily-deposit-review-v1', '/releases/old', 'interrupted after health validation');
+  assert.match(run('can-resume-writes', state, candidate, data), /^allowed:/);
+});
+
+test('interrupted or unknown deployment states require manual investigation and never clear write protection', () => {
+  const root = temp(); const candidate = makeRelease(root, 'candidate', 'daily-deposit-review-v1');
+  const data = path.join(root, 'data'); writeDeposits(data, ['confirmed']); const state = path.join(root, 'active-state.json');
+  run('state', state, 'manual_recovery_required', candidate, 'abc123', 'daily-deposit-review-v1', '', 'SIGTERM during deployment');
+  const result = tryRun('can-resume-writes', state, candidate, data);
+  assert.notStrictEqual(result.status, 0); assert.match(result.stderr, /requires manual investigation/);
+});
+
+test('deployment script records an interrupt-safe state before switching and traps catchable signals', () => {
+  const deploy = fs.readFileSync(path.resolve(__dirname, '../deploy/deploy-v2.sh'), 'utf8');
+  assert.match(deploy, /persist_deployment_state\ntrap on_deployment_signal HUP INT TERM/);
+  assert.match(deploy, /pm2 stop solarpoints-v2/);
+  assert.match(deploy, /live_read_only_healthy/);
+});

@@ -120,6 +120,31 @@ BACKUP_SHA256="$(printf '%s\n' "$BACKUP_INFO" | sed -n '2p')"
 mkdir -p "$HISTORY"
 DEPLOYED_AT="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 bash "$NEW_RELEASE/deploy/release-safety.sh" manifest "$HISTORY/$RELEASE_ID.json" "$RELEASE_ID" "$SOURCE_SHA" "$DEPLOYED_AT" "$NEW_COMPATIBILITY" "$OLD_RELEASE" "$BACKUP_FILE" "$BACKUP_SHA256"
+STATE_FILE="$HISTORY/active-deployment-state.json"
+DEPLOYMENT_PHASE="prepared"
+DEPLOYMENT_REASON="candidate prepared; no live process has been changed"
+persist_deployment_state() {
+  bash "$NEW_RELEASE/deploy/release-safety.sh" state "$STATE_FILE" "$DEPLOYMENT_PHASE" "$NEW_RELEASE" "$SOURCE_SHA" "$NEW_COMPATIBILITY" "$OLD_RELEASE" "$DEPLOYMENT_REASON" || true
+}
+on_deployment_signal() {
+  DEPLOYMENT_PHASE="manual_recovery_required"
+  DEPLOYMENT_REASON="deployment process interrupted; keep writes disabled until an administrator reviews the release record"
+  persist_deployment_state
+  pm2 stop solarpoints-v2 >/dev/null 2>&1 || true
+  exit 70
+}
+on_deployment_exit() {
+  local status="$?"
+  if [[ "$status" != 0 && "$DEPLOYMENT_PHASE" != normal_active && "$DEPLOYMENT_PHASE" != fallback_active ]]; then
+    DEPLOYMENT_PHASE="manual_recovery_required"
+    DEPLOYMENT_REASON="deployment exited unexpectedly; keep writes disabled until an administrator reviews the release record"
+    persist_deployment_state
+    pm2 stop solarpoints-v2 >/dev/null 2>&1 || true
+  fi
+}
+persist_deployment_state
+trap on_deployment_signal HUP INT TERM
+trap on_deployment_exit EXIT
 
 cat > "$APP_ROOT/ecosystem.v2.config.cjs" <<'PM2'
 module.exports = {
@@ -146,6 +171,9 @@ PM2
 SWITCH_LINK="$APP_ROOT/current.next-$RELEASE_ID"
 ln -s "$NEW_RELEASE" "$SWITCH_LINK"
 mv -Tf "$SWITCH_LINK" "$APP_ROOT/current"
+DEPLOYMENT_PHASE="live_read_only_starting"
+DEPLOYMENT_REASON="candidate selected; writes are not permitted"
+persist_deployment_state
 # PM2 keeps the original script path when startOrReload targets an existing app.
 # Replace only the V2 process so that it actually uses the current release link.
 start_current_release() {
@@ -165,6 +193,9 @@ if ! start_current_release 1; then
   echo "Candidate could not start. Automatic rollback is intentionally disabled after a release switch; inspect the release record and recover manually." >&2
   exit 5
 fi
+DEPLOYMENT_PHASE="live_read_only_validating"
+DEPLOYMENT_REASON="candidate is running read-only while health checks execute"
+persist_deployment_state
 
 healthy=0
 HEALTH_HTML="$(mktemp)"
@@ -178,9 +209,15 @@ for attempt in 1 2 3 4 5 6 7 8 9 10; do
   sleep 2
 done
 if [[ "$healthy" != 1 ]]; then
+  DEPLOYMENT_PHASE="manual_recovery_required"
+  DEPLOYMENT_REASON="read-only health validation failed; writes remain disabled pending administrator review"
+  persist_deployment_state
   pm2 stop solarpoints-v2 || true
   if bash "$NEW_RELEASE/deploy/release-safety.sh" safe-switch "$APP_ROOT/current" "$OLD_RELEASE" "$DATA_DIR"; then
     if start_current_release 0; then
+      DEPLOYMENT_PHASE="fallback_active"
+      DEPLOYMENT_REASON="read-only validation failed; compatibility-approved fallback is active"
+      persist_deployment_state
       pm2 save
       echo "Read-only candidate failed health validation; restored a compatibility-approved fallback." >&2
       exit 6
@@ -189,6 +226,9 @@ if [[ "$healthy" != 1 ]]; then
   echo "Read-only candidate failed health validation. Automatic fallback was refused; service remains stopped for manual recovery. Backup: $BACKUP_FILE" >&2
   exit 6
 fi
+DEPLOYMENT_PHASE="live_read_only_healthy"
+DEPLOYMENT_REASON="candidate completed live read-only health validation; administrator-confirmed recovery is possible if interrupted"
+persist_deployment_state
 
 # The validation phase accepted no state-changing HTTP requests.  Once the
 # candidate is healthy, restart it normally.  A later failure never triggers
@@ -197,6 +237,9 @@ if ! start_current_release 0; then
   echo "Validated candidate could not restart normally. Automatic rollback is disabled; recover manually using the recorded compatible release." >&2
   exit 7
 fi
+DEPLOYMENT_PHASE="normal_active"
+DEPLOYMENT_REASON="candidate is active with normal writes enabled"
+persist_deployment_state
 pm2 save
 echo "V2 deployed: $NEW_RELEASE"
 echo "Backup created: $BACKUP_FILE"

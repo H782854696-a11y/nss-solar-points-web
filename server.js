@@ -153,8 +153,10 @@ app.use((req, res, next) => {
 });
 app.use(express.static(path.join(__dirname, 'public')));
 
-// 启动时种子
-ensureSeeded();
+// A validation process must never seed or migrate the shared production data.
+// It only needs read-only health/static checks; the normal process keeps the
+// established initialization and migration behavior.
+if (process.env.SP_DEPLOY_READ_ONLY !== '1') ensureSeeded();
 
 // ============ 鉴权 ============
 
