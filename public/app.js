@@ -302,15 +302,15 @@ const SCREEN_PERMS = {
   sheets:    'sync.view',       // 云同步状态
   db:        'db.view',         // 数据主库
   audit:     'system.audit.view', // 审计日志（沿用既有权限，仅 admin）
-  accounts:  'system.user.view',  // 账号管理（列表沿用既有权限；启用/停用另需 system.user.edit，
-                                  //   两者当前都只授 admin。本页不新造权限。）
+  // accounts 不登记权限：它同时承载每位登录人的个人资料与改密；
+  // 全员账号列表和管理动作在 renderAccounts 内另行以 system.user.view / edit 把关。
   storeBiz:  'report.view',       // 门店经营（复用报表读取权限，零新增 RBAC）
   memberBiz: 'report.view',       // 会员经营（同上）
 };
 
 // 经营总览与经营报表不再作为独立板块开放；底层实现和数据保留以便回滚。
 const RETIRED_OPERATION_SCREENS = new Set(['dashboard', 'reports', 'storeBiz', 'memberBiz']);
-const HOME_SCREEN_ORDER = ['controlCenter', 'stores', 'db', 'audit', 'accounts', 'account'];
+const HOME_SCREEN_ORDER = ['controlCenter', 'stores', 'db', 'audit', 'accounts'];
 
 // 2026-10-07：门店「三板块」对店长角色关闭。
 // 背景：店长在旧菜单下会看到「门店管理 / 门店跟进 / 组织与流程设置」，
@@ -409,8 +409,8 @@ function bindSidebar() {
   const userBlock = $('#userBlock');
   if (userBlock) {
     userBlock.setAttribute('role', 'button'); userBlock.tabIndex = 0;
-    userBlock.setAttribute('aria-label', ccText('Account settings', '账号设置'));
-    userBlock.addEventListener('click', () => { setScreen('account'); closeNav(); });
+    userBlock.setAttribute('aria-label', ccText('Account management', '账号管理'));
+    userBlock.addEventListener('click', () => { setScreen('accounts'); closeNav(); });
     userBlock.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); userBlock.click(); } });
   }
 }
@@ -484,6 +484,8 @@ function updateHeaderCrumb() {
 }
 
 function setScreen(name) {
+  // 兼容旧书签：账号设置已合并到账号管理。
+  if (name === 'account') name = 'accounts';
   // 兜底拦截：侧栏入口虽然隐藏了，但如果页面结构被改动、或账号切换后没重绘，
   // 仍可能走到这里 —— 无权限时一律回落到仪表盘。
   if (!canAccessScreen(name)) name = homeScreen();
@@ -499,6 +501,7 @@ function setScreen(name) {
 async function renderScreen() {
   if (state.me?.mustChangePassword) { renderMandatoryPasswordChange(); return; }
   stopSheetsLive();
+  if (state.screen === 'account') state.screen = 'accounts';
   if (!canAccessScreen(state.screen)) state.screen = homeScreen();
   const root = $('#content');
   root.innerHTML = state.screen === 'controlCenter' ? `<div class="cc-loading" role="status" aria-label="${ccText('Loading control center', '正在加载中控平台')}"><div class="cc-loading-title"></div><div class="cc-loading-kpis">${'<div class="cc-loading-card"></div>'.repeat(4)}</div><div class="cc-loading-panel"></div></div>` : `<div class="card" style="text-align:center;color:#9AA8A2;padding:40px;">${t('common.loading')}</div>`;
@@ -518,7 +521,6 @@ async function renderScreen() {
     else if (state.screen === 'db') await renderDb(root);
     else if (state.screen === 'audit') await renderAudit(root);
     else if (state.screen === 'accounts') await renderAccounts(root);
-    else if (state.screen === 'account') renderAccount(root);
   } catch (e) {
     root.innerHTML = `<div class="card"><p>${t('common.loadFailed', { msg: escapeHtml(e.message) })}</p><button class="btn btn-primary" type="button" id="screenRetry">${ccText('Retry', '重试')}</button></div>`;
     root.querySelector('#screenRetry').addEventListener('click', () => { renderScreen(); });
@@ -4135,10 +4137,66 @@ async function renderAudit(root) {
 //   前端这里只是「不渲染必然失败的入口」（自身那行不渲染停用/删除按钮），
 //   绝不以隐藏按钮作为安全手段。
 
+function selfAccountSettingsHtml() {
+  const me = state.me || {};
+  const isStoreAccount = !!me.storeId;
+  const store = state.stores.find(s => s.id === me.storeId);
+  return `
+    <section class="cc-section" aria-label="${escapeHtml(t('account.title'))}">
+      <div class="card-header">
+        <div>
+          <div class="card-title">${t('account.profile')}</div>
+          <div class="card-subtitle">${isStoreAccount ? t('account.profileSubMgr') : t('account.profileSubAdmin')}</div>
+        </div>
+      </div>
+      <div class="row-2-eq">
+        <div class="card">
+          <div class="section">
+            <div class="kv-row"><span class="k">${t('account.username')}</span><span class="v mono">${escapeHtml(me.username || '—')}</span></div>
+            <div class="kv-row"><span class="k">${t('account.name')}</span><span class="v">${escapeHtml(tName(me.name || '—'))}</span></div>
+            <div class="kv-row"><span class="k">${t('account.role')}</span><span class="v"><span class="pill ${isStoreAccount ? 'pill-retail' : 'pill-b2b'}">${escapeHtml(roleLabel(me.role))}</span></span></div>
+            ${me.storeId ? `<div class="kv-row"><span class="k">${t('account.store')}</span><span class="v">${escapeHtml(store ? tStore(store.name) : '—')}</span></div>` : ''}
+            <div class="kv-row"><span class="k">${t('account.createdAt')}</span><span class="v mono" style="font-size:11px;">${me.createdAt ? new Date(me.createdAt).toLocaleString(locale()) : '—'}</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px;">${t('account.pwdCard')}</div>
+          <form data-form id="pwdForm">
+            <div class="modal-form-row"><label><span>${t('account.currentPwd')}</span><input type="password" name="currentPassword" required autocomplete="current-password"/></label></div>
+            <div class="modal-form-row"><label><span>${t('account.newPwd')}</span><input type="password" name="newPassword" required minlength="6" autocomplete="new-password"/></label></div>
+            <div class="modal-form-row"><label><span>${t('account.confirmPwd')}</span><input type="password" name="confirmPassword" required minlength="6" autocomplete="new-password"/></label></div>
+            <div class="modal-form-error" id="pwdError"></div>
+            <button class="btn btn-primary" type="submit" style="margin-top:8px;">${t('account.changePwd')}</button>
+          </form>
+        </div>
+      </div>
+    </section>`;
+}
+
+function bindSelfAccountSettings(root) {
+  $('#pwdForm', root)?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const data = Object.fromEntries(fd);
+    const error = $('#pwdError', root);
+    if (data.newPassword !== data.confirmPassword) { error.textContent = t('account.pwdMismatch'); return; }
+    try {
+      await POST('/api/auth/change-password', { currentPassword: data.currentPassword, newPassword: data.newPassword });
+      toast(t('account.pwdDone'), 'success');
+      e.target.reset(); error.textContent = '';
+    } catch (err) { error.textContent = tMsg(err.message); }
+  });
+}
+
 async function renderAccounts(root) {
-  // 防御：没有 system.user.view 时不要请求接口（403 会抛错），直接给一段说明
-  if (!can('system.user.view')) {
-    root.innerHTML = `<div class="card card-empty">${escapeHtml(t('common.noPermission'))}</div>`;
+  const canManageAccounts = can('system.user.view');
+  const personalSettings = selfAccountSettingsHtml();
+  // 所有人都能在这里维护自己的资料与密码；全员列表只对账号管理权限开放。
+  if (!canManageAccounts) {
+    root.innerHTML = `
+      <div class="page-header"><div class="page-header-text"><div class="page-title">${t('accounts.title')}</div><div class="page-subtitle">${t('account.subtitle')}</div></div></div>
+      ${personalSettings}`;
+    bindSelfAccountSettings(root);
     return;
   }
   // 门店名解析要用最新门店表（有 store.view 才刷；没有就沿用已有数据，只影响展示）
@@ -4241,6 +4299,7 @@ async function renderAccounts(root) {
       </div>
       <div class="page-spacer"></div>
     </div>
+    ${personalSettings}
     <div class="cc-workspace-stats">${uiStat(ccText('Total accounts', '账号总数'), items.length, 'brand')}${uiStat(ccText('Enabled', '启用中'), enabledCount, 'success')}${uiStat(ccText('Disabled', '已停用'), items.length - enabledCount, 'neutral')}${uiStat(ccText('Store linked', '关联门店'), storeAccountCount, 'warning')}</div>
     ${canEdit ? `<section class="card cc-section"><h3>${ccText('Create login account', '创建登录账号')}</h3><p>${ccText('Set a unique username and a temporary password of at least 6 characters. Store and regional roles must be bound to their scope.', '用户名须唯一，初始密码至少 6 位。门店和区域岗位必须绑定对应范围。')}</p><form id="ccAccountForm" class="cc-form-grid"><label class="cc-field"><span>${ccText('Username', '用户名')}</span><input name="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9_]+"/></label><label class="cc-field"><span>${ccText('Full name', '姓名')}</span><input name="name" required maxlength="120"/></label><label class="cc-field"><span>${ccText('Initial password (6+ characters)', '初始密码（至少 6 位）')}</span><input name="password" type="password" required minlength="6" autocomplete="new-password"/></label><label class="cc-field"><span>${ccText('Role', '角色')}</span><select name="role"><option value="owner">${escapeHtml(roleLabel('owner'))}</option><option value="hq_operator">${escapeHtml(roleLabel('hq_operator'))}</option><option value="philippines_manager">${escapeHtml(roleLabel('philippines_manager'))}</option><option value="regional_manager">${escapeHtml(roleLabel('regional_manager'))}</option><option value="purchaser">${escapeHtml(roleLabel('purchaser'))}</option><option value="manager">${escapeHtml(roleLabel('store_manager'))}</option><option value="sales">${escapeHtml(roleLabel('sales'))}</option><option value="warehouse">${escapeHtml(roleLabel('warehouse'))}</option><option value="service">${escapeHtml(roleLabel('service'))}</option><option value="admin">${escapeHtml(roleLabel('admin'))}</option></select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">${ccText('No store', '不绑定门店')}</option>${state.stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Region', '区域')}</span><select name="regionId"><option value="">${ccText('No region', '不绑定区域')}</option>${accountRegions.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Employee profile', '关联员工档案')}</span><select name="employeeId"><option value="">${ccText('No employee link', '不关联员工')}</option>${accountEmployees.filter(x => !x.userId).map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Phone', '电话')}</span><input name="phone" maxlength="80"/></label><div class="cc-wide"><button class="btn btn-primary" type="submit">${ccText('Create account', '创建账号')}</button></div></form></section>` : ''}
     <div class="card" style="padding:11px 16px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--muted);">
@@ -4252,6 +4311,8 @@ async function renderAccounts(root) {
       ? `<div class="card" style="text-align:center;color:var(--muted);padding:44px;">${escapeHtml(t('accounts.empty'))}</div>`
       : `<div class="tx-list" style="max-height:none;">${headHtml}${items.map(rowHtml).join('')}</div>`}
   `;
+
+  bindSelfAccountSettings(root);
 
   $('#ccAccountForm')?.addEventListener('submit', async e => {
     e.preventDefault(); const fd = new FormData(e.currentTarget);
@@ -4397,59 +4458,6 @@ function showNewPasswordDialog(account, password) {
       copyBtn.textContent = t('accounts.resetPwCopied');
       setTimeout(() => { copyBtn.textContent = t('accounts.resetPwCopy'); }, 1600);
     } catch (e) { toast(t('accounts.resetPwCopy') + ' ✗', 'error'); }
-  });
-}
-
-function renderAccount(root) {
-  // 本页只有展示，没有写操作 —— 因此不涉及任何权限判断，只做「总部账号 / 门店账号」的文案区分。
-  const isStoreAccount = !!state.me.storeId;
-  root.innerHTML = `
-    <div class="page-header">
-      <div class="page-header-text">
-        <div class="page-title">${t('account.title')}</div>
-        <div class="page-subtitle">${t('account.subtitle')}</div>
-      </div>
-    </div>
-    <div class="row-2-eq">
-      <div class="card">
-        <div class="card-title">${t('account.profile')}</div>
-        <div class="card-subtitle" style="margin-bottom:16px;">${isStoreAccount ? t('account.profileSubMgr') : t('account.profileSubAdmin')}</div>
-        <div class="section">
-          <div class="kv-row"><span class="k">${t('account.username')}</span><span class="v mono">${escapeHtml(state.me.username)}</span></div>
-          <div class="kv-row"><span class="k">${t('account.name')}</span><span class="v">${escapeHtml(tName(state.me.name))}</span></div>
-          <div class="kv-row"><span class="k">${t('account.role')}</span><span class="v"><span class="pill ${isStoreAccount ? 'pill-retail' : 'pill-b2b'}">${escapeHtml(roleLabel(state.me.role))}</span></span></div>
-          ${state.me.storeId ? `<div class="kv-row"><span class="k">${t('account.store')}</span><span class="v">${escapeHtml(state.stores.find(s => s.id === state.me.storeId)?.name || '—')}</span></div>` : ''}
-          <div class="kv-row"><span class="k">${t('account.createdAt')}</span><span class="v mono" style="font-size:11px;">${new Date(state.me.createdAt).toLocaleString(locale())}</span></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title" style="margin-bottom:16px;">${t('account.pwdCard')}</div>
-        <form data-form id="pwdForm">
-          <div class="modal-form-row">
-            <label><span>${t('account.currentPwd')}</span><input type="password" name="currentPassword" required/></label>
-          </div>
-          <div class="modal-form-row">
-            <label><span>${t('account.newPwd')}</span><input type="password" name="newPassword" required minlength="6"/></label>
-          </div>
-          <div class="modal-form-row">
-            <label><span>${t('account.confirmPwd')}</span><input type="password" name="confirmPassword" required minlength="6"/></label>
-          </div>
-          <div class="modal-form-error" id="pwdError"></div>
-          <button class="btn btn-primary" type="submit" style="margin-top:8px;">${t('account.changePwd')}</button>
-        </form>
-      </div>
-    </div>
-  `;
-  $('#pwdForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const data = Object.fromEntries(fd);
-    if (data.newPassword !== data.confirmPassword) { $('#pwdError').textContent = t('account.pwdMismatch'); return; }
-    try {
-      await POST('/api/auth/change-password', { currentPassword: data.currentPassword, newPassword: data.newPassword });
-      toast(t('account.pwdDone'), 'success');
-      e.target.reset(); $('#pwdError').textContent = '';
-    } catch (err) { $('#pwdError').textContent = tMsg(err.message); }
   });
 }
 
