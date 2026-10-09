@@ -330,6 +330,11 @@ button, input, select, textarea { font-family: inherit; }
   letter-spacing: .12em; text-transform: uppercase;
   padding: 6px 10px 8px;
 }
+/* 同一侧栏中出现多个业务域时，用轻分隔而不是重复卡片，帮助快速扫读。 */
+.nav-group-label:not(:first-child) {
+  margin-top: 10px; padding-top: 16px;
+  border-top: 1px solid var(--nav-line);
+}
 .nav-item {
   position: relative;
   display: flex; align-items: center; gap: 11px;
