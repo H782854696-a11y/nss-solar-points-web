@@ -11,22 +11,33 @@
   <link rel="icon" type="image/svg+xml" href="/pwa-icon.svg" />
   <link rel="manifest" href="/manifest.webmanifest" />
 <title data-i18n="nav.titleAttr">NSS Solar · 中控平台</title>
-  <link rel="stylesheet" href="/styles.css?v=45" />
+  <link rel="stylesheet" href="/styles.css?v=46" />
   <link rel="stylesheet" href="/tokens.css?v=1" />
-  <link rel="stylesheet" href="/ui-review.css?v=7" />
+  <link rel="stylesheet" href="/ui-review.css?v=12" />
 </head>
 <body>
-  <!-- ============ 登录页 / Login（2026-09-25 摄影背景重构：全屏光伏电站 + 左品牌组 + 右玻璃登录卡） ============ -->
-  <!-- ============ 登录页 / Login（2026-09-25 沉浸式居中版：全屏照片 + 单一中轴：logo→标题→深色面板；无分栏、无白卡、无营销文案） ============ -->
+  <!-- ============ 登录页 / Login（B 方案：NSS Solar 明亮品牌风格；不改变认证表单） ============ -->
   <div id="loginPage" class="login-page">
     <div class="login-bg"></div>
     <div class="login-shade"></div>
     <button class="lang-btn lang-btn-floating" id="langBtnLogin" data-lang-label type="button" title=""></button>
-    <div class="login-center">
-      <img src="/logo-brand.png" alt="NSS Solar" class="login-logo" />
-      <h1 class="login-title"><span data-i18n="login.titleMain">NSS Solar </span><span class="login-title-accent" data-i18n="login.titleAccent">管理平台</span></h1>
-      <div class="login-subtitle" data-i18n="login.subtitle">流程审批 · 门店运营 · 任务协作</div>
+    <main class="login-center">
+      <section class="login-brand-copy" aria-label="NSS Solar">
+        <img src="/logo-green.png" alt="NSS Solar" class="login-logo" />
+        <h1 class="login-title"><span data-i18n="login.titleMain">NSS Solar </span><span class="login-title-accent" data-i18n="login.titleAccent">管理平台</span></h1>
+        <div class="login-subtitle" data-i18n="login.brandPromise">Clean energy · Better collaboration · Sustainable growth</div>
+        <div class="login-values" aria-label="NSS Solar values">
+          <div><span class="login-value-icon" aria-hidden="true">✦</span><span data-i18n="login.valueClean">清洁能源</span></div>
+          <div><span class="login-value-icon" aria-hidden="true">◎</span><span data-i18n="login.valueTeam">高效协作</span></div>
+          <div><span class="login-value-icon" aria-hidden="true">↗</span><span data-i18n="login.valueGrowth">持续发展</span></div>
+        </div>
+      </section>
+      <section class="login-card-wrap">
       <form id="loginForm" class="login-panel">
+        <div class="login-form-heading">
+          <h2 data-i18n="login.formHeading">欢迎登录</h2>
+          <p data-i18n="login.formSubtitle">SolarPoints V2 管理平台</p>
+        </div>
         <label class="field">
           <span class="field-label" data-i18n="login.username">账号</span>
           <span class="input-wrap">
@@ -48,7 +59,9 @@
         <div id="loginError" class="login-error"></div>
         <button type="submit" class="login-submit" id="loginSubmit" data-i18n="login.submit">登 录</button>
       </form>
-    </div>
+      <div class="login-card-foot"><span>NSS Solar</span><i aria-hidden="true"></i><span>Clean Energy · Brighter Tomorrow</span></div>
+      </section>
+    </main>
   </div>
 
   <!-- ============ 主应用 / App shell ============ -->
@@ -134,7 +147,7 @@
   <div id="modalRoot" class="modal-root hidden"></div>
 
 <script src="/i18n.js?v=32"></script>
-  <script src="/app.js?v=78"></script>
+  <script src="/app.js?v=82"></script>
   <script>if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/service-worker.js').catch(() => {}));</script>
 </body>
 </html>

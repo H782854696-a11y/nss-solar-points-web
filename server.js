@@ -57,7 +57,7 @@ function getSessionUser(req) {
 }
 
 function isStoreManagerRole(role) { return rbac.normalizeRole(role) === 'store_manager'; }
-function requiresForcedPasswordChange(user) { return !!user?.mustChangePassword && !isStoreManagerRole(user.role); }
+function requiresForcedPasswordChange(user) { return !!user?.mustChangePassword; }
 
 // ---------- 登录失败限流（防暴力破解） ----------
 // 同一 IP + 账号连续失败 5 次锁定 5 分钟。失败尝试也写审计，便于事后发现异常。
@@ -642,7 +642,8 @@ app.post('/api/users/:id/reset-password', (req, res) => {
   if (newPassword.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
 
   target.password = bcrypt.hashSync(newPassword, 12);
-  target.mustChangePassword = !isStoreManagerRole(target.role);
+  // 重置为临时密码后，所有角色都必须先自行改密；不能因角色而绕过此门禁。
+  target.mustChangePassword = true;
   writeAll('users', users);   // 只改 password 一个字段 → dataVersion 正常 +1
   // 作废该账号的全部旧会话
   let killed = 0;

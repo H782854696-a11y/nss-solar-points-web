@@ -1,6 +1,6 @@
 const CACHE_PREFIX = 'nss-control-shell-v';
-const CACHE = `${CACHE_PREFIX}38`;
-const SHELL = ['/', '/index.html', '/styles.css', '/tokens.css', '/ui-review.css', '/app.js', '/i18n.js', '/manifest.webmanifest', '/logo-brand.png', '/pwa-icon.svg', '/pwa-icon-180.png', '/pwa-icon-192.png', '/pwa-icon-512.png', '/pwa-icon-maskable-512.png'];
+const CACHE = `${CACHE_PREFIX}43`;
+const SHELL = ['/', '/index.html', '/styles.css', '/tokens.css', '/ui-review.css', '/app.js', '/i18n.js', '/manifest.webmanifest', '/logo-brand.png', '/logo-green.png', '/login-b-bg.png', '/pwa-icon.svg', '/pwa-icon-180.png', '/pwa-icon-192.png', '/pwa-icon-512.png', '/pwa-icon-maskable-512.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
 });
