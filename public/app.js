@@ -98,18 +98,29 @@ function toast(message, type = 'info') {
 
 // =================== 语言切换 ===================
 function syncLangButtons() {
-  $$('#langBtn, #langBtnLogin').forEach(b => {
+  $$('#langBtn').forEach(b => {
     b.textContent = t('common.langSwitch');
     b.title = t('common.langSwitchTitle');
   });
+  const zhButton = $('#langBtnLogin');
+  const enButton = $('#langBtnLoginEn');
+  if (zhButton && enButton) {
+    const zh = getLang() === 'zh';
+    zhButton.classList.toggle('active', zh);
+    enButton.classList.toggle('active', !zh);
+    zhButton.setAttribute('aria-pressed', String(zh));
+    enButton.setAttribute('aria-pressed', String(!zh));
+  }
 }
 
 function bindLangButtons() {
   applyStatic();
   syncLangButtons();
-  $$('#langBtn, #langBtnLogin').forEach(b => {
+  $$('#langBtn').forEach(b => {
     b.addEventListener('click', () => setLang(getLang() === 'zh' ? 'en' : 'zh'));
   });
+  $('#langBtnLogin')?.addEventListener('click', () => setLang('zh'));
+  $('#langBtnLoginEn')?.addEventListener('click', () => setLang('en'));
   onChange(() => {
     syncLangButtons();
     /* 2026-10-07 i18n 修复：语言切换时必须重新应用 data-i18n，

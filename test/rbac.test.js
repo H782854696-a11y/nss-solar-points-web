@@ -55,10 +55,10 @@ ok('旧 manager 的 store scope 生效（他店会员不可改）', !rbac.can(U.
 console.log('\n【2】admin 向后兼容（保留业务权限用于运维）');
 let adminAll = true; const adminMissing = [];
 for (const p of rbac.PERMISSIONS) {
-  if (p === 'kingdee.edit') continue;             // 金蝶绝不回写，admin 也不行
+  if (p === 'kingdee.edit' || p === 'deposit.submit') continue; // 金蝶绝不回写；存款仅由绑定门店的店长确认
   if (!rbac.hasPermission(U.admin, p)) { adminAll = false; adminMissing.push(p); }
 }
-ok(`admin 拥有除 kingdee.edit 外的全部 ${rbac.PERMISSIONS.length - 1} 个权限`, adminAll, adminMissing);
+ok(`admin 拥有除 kingdee.edit / deposit.submit 外的全部 ${rbac.PERMISSIONS.length - 2} 个权限`, adminAll, adminMissing);
 ok('admin 拥有 member.edit（现有会员维护不失效）', rbac.hasPermission(U.admin, 'member.edit'));
 ok('admin 拥有 approval.approve（现有审核不失效）', rbac.hasPermission(U.admin, 'approval.approve'));
 ok('admin 拥有 system.role.manage', rbac.hasPermission(U.admin, 'system.role.manage'));
@@ -119,6 +119,14 @@ ok('全国区域负责人授权全部是 philippines（无一遗漏）',
   rbac.grantsFor('regional_manager').length > 0 &&
   rbac.grantsFor('regional_manager').every(g => g.s === 'philippines'),
   rbac.grantsFor('regional_manager').filter(g => g.s !== 'philippines').map(g => g.p + ':' + g.s));
+ok('全国区域负责人可查看并提醒全菲律宾当日存款',
+  rbac.permScope(U.regA, 'deposit.view') === 'philippines' &&
+  rbac.permScope(U.regA, 'deposit.remind') === 'philippines' &&
+  rbac.can(U.regA, 'deposit.view', { country: 'PH', storeId: 'SB', regionId: 'R-B' }) &&
+  rbac.can(U.regA, 'deposit.remind', { country: 'PH', storeId: 'SB', regionId: 'R-B' }));
+ok('全国区域负责人当日存款权限仍对非菲律宾数据 fail-closed',
+  !rbac.can(U.regA, 'deposit.view', { country: 'CN', storeId: 'CN1' }) &&
+  !rbac.can(U.regA, 'deposit.remind', { country: 'CN', storeId: 'CN1' }));
 ok('生产矩阵里已没有任何角色使用 region 范围（该范围仅由测试探针覆盖）',
   Object.keys(rbac.ROLE_GRANTS).filter(r => r.indexOf('__probe_') !== 0)
     .every(r => rbac.grantsFor(r).every(g => g.s !== 'region')));
