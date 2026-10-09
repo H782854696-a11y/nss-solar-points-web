@@ -1104,10 +1104,14 @@ app.post('/api/v2/daily-deposits/:storeId/confirm', (req, res) => {
   recordControlAudit(req, u, 'daily_deposit.confirm', 'dailyDeposit', item.id, { storeId: item.storeId, depositDate: date });
   res.status(201).json({ item });
 });
+function userHoldsPosition(user, positionId) {
+  const employee = user && (readAll('employees') || []).find(x => x.id === user.employeeId && x.active !== false);
+  return !!employee && employee.positionId === positionId;
+}
 function approvalSlotsForUser(instance, user) {
   const step = (instance.approvalSteps || [])[instance.currentStep];
   if (!step || !user) return [];
-  return (step.approvers || []).filter(a => a.kind === 'user' ? a.id === user.id : rbac.normalizeRole(a.id) === rbac.normalizeRole(user.role)).map(a => `${a.kind}:${a.id}`);
+  return (step.approvers || []).filter(a => a.kind === 'user' ? a.id === user.id : a.kind === 'position' ? userHoldsPosition(user, a.id) : rbac.normalizeRole(a.id) === rbac.normalizeRole(user.role)).map(a => `${a.kind}:${a.id}`);
 }
 function approvalSlotForActor(instance, user) {
   if (!user) return null;
@@ -1134,6 +1138,10 @@ function notifyCurrentApprovers(instance) {
     if (approver.kind === 'user') {
       const user = users.find(x => x.id === approver.id && !x.disabled);
       if (user && rbac.hasPermission(user, 'workflow.approve') && rbac.hasPermission(user, 'workflow.view') && rbac.can(user, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(user, 'workflow.view', { ...instance, country: 'PH' })) ids.add(user.id);
+    } else if (approver.kind === 'position') {
+      users.filter(x => !x.disabled && userHoldsPosition(x, approver.id))
+        .filter(x => rbac.hasPermission(x, 'workflow.approve') && rbac.hasPermission(x, 'workflow.view') && rbac.can(x, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(x, 'workflow.view', { ...instance, country: 'PH' }))
+        .forEach(x => ids.add(x.id));
     } else {
       users.filter(x => !x.disabled && (x.role === approver.id || rbac.normalizeRole(x.role) === rbac.normalizeRole(approver.id)))
         .filter(x => rbac.hasPermission(x, 'workflow.approve') && rbac.hasPermission(x, 'workflow.view') && rbac.can(x, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(x, 'workflow.view', { ...instance, country: 'PH' }))
@@ -1334,12 +1342,15 @@ app.put('/api/v2/workflows/definitions/:type', (req, res) => {
   const activeUsers = readAll('users') || [];
   const normalized = [];
   for (const step of steps) {
-    const approvers = Array.isArray(step.approvers) ? step.approvers.map(a => ({ kind: a.kind === 'user' ? 'user' : 'role', id: controlCenter.cleanText(a.id, 100) })).filter(a => a.id) : [];
+    const approvers = Array.isArray(step.approvers) ? step.approvers.map(a => ({ kind: ['user','position'].includes(a.kind) ? a.kind : 'role', id: controlCenter.cleanText(a.id, 100) })).filter(a => a.id) : [];
     if (!approvers.length || approvers.length > 20) return res.status(400).json({ error: '每个审批步骤至少需要 1 名用户或角色，最多 20 名' });
     if (approvers.some(a => a.kind === 'role' && !validRoles.includes(a.id))) return res.status(400).json({ error: '审批角色不在系统角色清单内' });
     if (approvers.some(a => a.kind === 'role' && (!rbac.hasPermission({ role: a.id }, 'workflow.approve') || !rbac.hasPermission({ role: a.id }, 'workflow.view')))) return res.status(400).json({ error: `角色“${a.id}”缺少流程查看或审批权限` });
     if (approvers.some(a => a.kind === 'user' && !activeUsers.some(x => x.id === a.id && !x.disabled))) return res.status(400).json({ error: '审批用户不存在或已停用' });
     if (approvers.some(a => a.kind === 'user' && (!rbac.hasPermission(activeUsers.find(x => x.id === a.id), 'workflow.approve') || !rbac.hasPermission(activeUsers.find(x => x.id === a.id), 'workflow.view')))) return res.status(400).json({ error: '指定审批账号缺少流程查看或审批权限' });
+    const activePositions = readAll('positions') || [];
+    if (approvers.some(a => a.kind === 'position' && !activePositions.some(x => x.id === a.id && x.active !== false))) return res.status(400).json({ error: '审批职位不存在或已停用' });
+    if (approvers.some(a => a.kind === 'position' && !activeUsers.some(x => userHoldsPosition(x, a.id) && rbac.hasPermission(x, 'workflow.approve') && rbac.hasPermission(x, 'workflow.view')))) return res.status(400).json({ error: '审批职位目前没有具备审批权限的在职账号' });
     normalized.push({ label: controlCenter.cleanText(step.label || 'Approval', 100), mode: step.mode === 'all' ? 'all' : 'any', approvers });
   }
   const defs = readAll('workflowDefinitions') || [], existing = defs.find(x => x.type === type);
@@ -1377,9 +1388,7 @@ app.post('/api/v2/workflows', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'workflow.create')) return;
   const b = req.body || {}, type = String(b.type || '');
-  // 2026-10-07：门店整改已停用新建（前端三个入口一并移除）。
-  // 服务端同步拦截，防止绕过界面直接调 API 建单；存量申请不受影响，仍可审批/整改/关闭。
-  if (type === 'store_remediation') return res.status(400).json({ error: '门店整改流程已停用新建，如有需要请联系集团管理员' });
+  // 门店整改重新纳入本轮已确认范围；仍由下面的通用审批与执行闭环统一守卫。
   if (b.sourceFile && type !== 'stocktake') return res.status(400).json({ error: '只有盘点申请可以直接附加表格' });
   const sourceResult = b.sourceFile ? parseStocktakeSourceFile(b.sourceFile) : null;
   if (sourceResult?.error) return res.status(400).json({ error: sourceResult.error });

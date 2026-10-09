@@ -17,11 +17,17 @@ const validStocktake = (overrides = {}) => ({
   },
 });
 
-test('only stocktake approval and store remediation can be created', () => {
-  assert.deepEqual(Object.keys(controlCenter.WORKFLOW_TYPES).sort(), ['stocktake', 'store_remediation']);
+test('configured management request types are available and retired legacy types remain disabled', () => {
+  assert.deepEqual(Object.keys(controlCenter.WORKFLOW_TYPES).sort(), ['discount_request', 'expense_reimbursement', 'purchase_request', 'stocktake', 'store_receipt', 'store_remediation']);
   for (const removedType of ['purchase', 'expense', 'payment', 'transfer', 'stock_adjustment', 'price_adjustment']) {
     assert.equal(controlCenter.validateWorkflow(removedType, {}).ok, false, `${removedType} must remain disabled`);
   }
+});
+
+test('new configurable request types validate their required fields and amount', () => {
+  assert.equal(controlCenter.validateWorkflow('store_receipt', { storeName: 'Cebu', receiptDate: '2026-10-09', receiptSummary: '12 panels received' }).ok, true);
+  assert.equal(controlCenter.validateWorkflow('discount_request', { orderNumber: 'SO-1001', discountReason: 'Approved campaign', amount: '25.50' }).value.amount, 25.5);
+  assert.match(controlCenter.validateWorkflow('expense_reimbursement', { expenseDate: '2026-10-09', expenseCategory: 'Travel', amount: 0, reason: 'Client visit' }).error, /金额/);
 });
 
 test('stocktake validates rows and computes final count variance', () => {

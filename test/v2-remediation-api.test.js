@@ -24,7 +24,7 @@ function freePort() {
   });
 }
 
-test('store remediation creation is disabled while stocktake upload keeps working', { timeout: 30000 }, async t => {
+test('store remediation creation and stocktake upload work in the isolated V2 flow', { timeout: 30000 }, async t => {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nss-v2-remediation-'));
   const port = await freePort();
   const child = spawn(process.execPath, ['server.js'], {
@@ -104,29 +104,17 @@ test('store remediation creation is disabled while stocktake upload keeps workin
   assert.equal(managerTask.data.item.storeId, storeId, 'store manager task is bound to their store');
   const managerTasks = await request('GET', '/api/v2/tasks', null, managerCookie);
   assert.equal(managerTasks.data.items.some(item => item.id === managerTask.data.item.id), true);
-  // 2026-10-07：门店整改已停用新建。
-  // 原用例（108–172 行）整段依赖「新建整改 → 审批 → 指派 → 前后证据 → 复查关闭」，
-  // 该链路已停用，故改为验证三件新规则必须成立：
-  //   1. 任何角色（含 admin）都不能再新建门店整改 —— 服务端硬拦截，不只是隐藏按钮；
-  //   2. 拦截发生在校验前，因此缺失字段也返回停用提示而非字段报错；
-  //   3. 拦截只针对 store_remediation，不影响仍在流转的盘点申请。
-  const blocked = await request('POST', '/api/v2/workflows', {
+  const remediation = await request('POST', '/api/v2/workflows', {
     type: 'store_remediation', title: 'Isolated remediation check',
     form: { storeName: 'Test location', issue: 'Broken safety sign', dueDate: '2026-12-31' },
   }, admin);
-  assert.equal(blocked.status, 400, 'store remediation creation must be blocked');
-  assert.match(String(blocked.data?.error || ''), /停用新建/, 'returns an explicit "creation disabled" message');
-  const blockedIncomplete = await request('POST', '/api/v2/workflows', {
+  assert.equal(remediation.status, 201, JSON.stringify(remediation.data));
+  const incomplete = await request('POST', '/api/v2/workflows', {
     type: 'store_remediation', title: 'Missing fields', form: {},
   }, admin);
-  assert.equal(blockedIncomplete.status, 400);
-  assert.match(String(blockedIncomplete.data?.error || ''), /停用新建/, 'disabled check precedes field validation');
-  const blockedForManager = await request('POST', '/api/v2/workflows', {
-    type: 'store_remediation', title: 'Manager attempt', form: { storeName: 'X', issue: 'Y', dueDate: '2026-12-31' },
-  }, managerCookie);
-  assert.equal(blockedForManager.status, 400, 'blocked for store managers too, not only administrators');
-  const noRemediation = await request('GET', '/api/v2/workflows', null, admin);
-  assert.equal(noRemediation.data.items.some(item => item.type === 'store_remediation'), false, 'no remediation request was created');
+  assert.equal(incomplete.status, 400, 'required remediation fields remain validated');
+  const remediationList = await request('GET', '/api/v2/workflows', null, admin);
+  assert.equal(remediationList.data.items.some(item => item.id === remediation.data.item.id), true, 'remediation is visible in the list');
 
   // 盘点申请不受影响：仍可正常新建并出现在列表中
   // （盘点要求 1–2,000 行明细或上传 Excel，故给一条明细，不能用空 items）
@@ -137,9 +125,6 @@ test('store remediation creation is disabled while stocktake upload keeps workin
   assert.equal(stocktakeStillWorks.status, 201, JSON.stringify(stocktakeStillWorks.data));
   const afterBlockList = await request('GET', '/api/v2/workflows', null, admin);
   assert.equal(afterBlockList.data.items.some(item => item.id === stocktakeStillWorks.data.item.id), true, 'stocktake remains visible in the list');
-
-  // 巡检转整改同样走 POST /api/v2/workflows（type=store_remediation），
-  // 因此上面的服务端拦截已一并覆盖，无需重复断言。
 
   const XLSX = require('../public/xlsx.full.min.js');
   const workbook = XLSX.utils.book_new();
