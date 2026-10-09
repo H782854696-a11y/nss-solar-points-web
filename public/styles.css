@@ -353,6 +353,23 @@ button, input, select, textarea { font-family: inherit; }
 .nav-item-primary.active svg { color: #fff; }
 .cc-section { margin: 18px 0; }
 .cc-section h3 { margin: 0 0 12px; font-size: 16px; }
+.cc-org-tree { margin: 14px 0 18px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: #fbfdff; }
+.cc-org-tree details { margin: 4px 0; }
+.cc-org-tree summary { display: flex; align-items: center; gap: 8px; min-height: 34px; cursor: pointer; list-style: none; }
+.cc-org-tree summary::-webkit-details-marker { display: none; }
+.cc-tree-folder { color: var(--brand); font-size: 15px; }
+.cc-org-tree summary small, .cc-tree-people small { color: var(--muted); margin-left: auto; font-size: 11px; }
+.cc-tree-children { margin-left: 16px; padding-left: 15px; border-left: 1px solid #dce6f5; }
+.cc-tree-people { margin: 2px 0 8px 16px; padding-left: 15px; border-left: 1px solid #dce6f5; display: grid; gap: 5px; }
+.cc-tree-people > span { display: flex; gap: 8px; align-items: center; min-height: 28px; color: var(--ink); }
+.cc-approval-step-cards { display: grid; gap: 10px; margin: 14px 0; }
+.cc-approval-step-card { padding: 12px; border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 10px; background: #fff; }
+.cc-approval-step-card > div:first-child { display: flex; align-items: center; gap: 10px; }
+.cc-approval-step-card select { min-height: 32px; }
+.cc-route-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+.cc-route-chips span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 7px; border-radius: 999px; background: var(--tint-100); color: var(--brand); font-size: 12px; }
+.cc-route-chips button { border: 0; background: transparent; color: inherit; cursor: pointer; font-size: 16px; line-height: 1; }
+.cc-route-picker { margin-bottom: 12px; }
 .cc-section > p { color: var(--muted); margin: 0 0 10px; }
 .cc-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 14px; }
 .cc-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; color: var(--muted); font-size: 12px; }
