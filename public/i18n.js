@@ -53,7 +53,7 @@
     'login.titleMain': ['SolarPoints V2', 'SolarPoints V2'],
     'login.titleAccent': ['Enterprise Management & Collaboration', '企业管理协同平台'],
     'login.subtitle': ['Workflow approvals · store operations · task collaboration', '流程审批 · 门店运营 · 任务协作'],
-    'login.brandPromise': ['Efficient Collaboration · Sustainable Growth', '高效协同 · 绿色发展'],
+    'login.brandPromise': ['Efficiency · Collaboration · Green Growth · Shared Success', '高效 · 协同 · 绿色 · 共赢'],
     'login.valueClean': ['Clean energy', '清洁能源'],
     'login.valueTeam': ['Better collaboration', '高效协作'],
     'login.valueGrowth': ['Sustainable growth', '可持续发展'],
