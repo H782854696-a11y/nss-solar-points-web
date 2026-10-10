@@ -394,7 +394,10 @@ const status = (who, id, disabled) => as(who, 'PUT', '/api/users/' + id + '/stat
   ok('renderAccounts 已定义', accFn.length > 0);
   ok('confirmUserStatus 已定义', stFn.length > 0);
   ok('confirmUserDelete 已定义（2026-09-24 用户授权新增）', delFn.length > 0);
-  ok('SCREEN_PERMS 登记了 accounts → system.user.view', /accounts:\s*'system\.user\.view'/.test(APPJS));
+  ok('个人资料页对登录用户开放，账号列表由 system.user.view 单独门禁',
+    !/accounts:\s*'system\.user\.view'/.test(APPJS) &&
+    /const canManageAccounts = can\('system\.user\.view'\)/.test(accFn) &&
+    /if \(!canManageAccounts\)/.test(accFn) && /GET\('\/api\/users'\)/.test(accFn));
   ok('renderScreen 分发里有 accounts 分支', /state\.screen === 'accounts'\)\s*await renderAccounts/.test(APPJS));
   ok('index.html 有 data-screen="accounts" 导航项', IDX.indexOf('data-screen="accounts"') !== -1);
   ok('index.html 已把 app.js 版本提到 v>=36',

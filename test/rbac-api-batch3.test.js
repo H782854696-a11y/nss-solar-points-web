@@ -56,6 +56,7 @@ function seed() {
     mkUser('UA', 't_admin', 'Admin#123', '管理员', 'admin'),
     mkUser('UH', 't_hq', 'Hq#123456', '总部运营', 'hq_operator'),          // ⚠ 无 staff.assign
     mkUser('UP', 't_ph', 'Ph#123456', '菲律宾负责人', 'philippines_manager'),
+    mkUser('URPH', 't_regPH', 'Reg#12345', '全国区域负责人', 'regional_manager', { regionId: 'R-A' }),
     mkUser('UR', 't_regA', 'Reg#12345', 'A区负责人', REGION_ROLE, { regionId: 'R-A' }),
     mkUser('UM', 't_mgrA', 'Mgr#12345', 'A区一号店店长', 'manager', { storeId: 'SA' }),
     mkUser('UN', 't_mgrB', 'Mgr#12345', 'B区一号店店长', 'store_manager', { storeId: 'SB' }),
@@ -167,6 +168,21 @@ const mgrBody = (tag) => ({ username: 'mgr_' + tag, name: '新店长' + tag, pas
   ok('菲律宾负责人分配店长 → 200', r.status === 200, r.data);
   const phMgrId = r.data && r.data.manager && r.data.manager.id;
   ok('店长已绑定到该门店', r.data && r.data.store && r.data.store.managerId === phMgrId, r.data && r.data.store);
+
+  // ─────────── 全国区域负责人当日存款全菲律宾范围 ───────────
+  console.log('\n【regional_manager：当日存款查看与提醒范围 = 全菲律宾】');
+  ok('全国区域负责人登录', await login('t_regPH', 'Reg#12345') === 200);
+  r = await req('GET', '/api/v2/daily-deposits');
+  const depositStoreIds = ((r.data && r.data.items) || []).map(item => item.storeId).sort();
+  ok('A区负责人可查看 B 区菲律宾门店(SB)的当日存款',
+    r.status === 200 && depositStoreIds.includes('SB') && r.data.canRemind === true && r.data.canSubmit === false,
+    { status: r.status, depositStoreIds, canRemind: r.data && r.data.canRemind, canSubmit: r.data && r.data.canSubmit });
+  r = await req('POST', '/api/v2/daily-deposits/SB/remind', {});
+  ok('A区负责人可提醒 B 区菲律宾门店店长', r.status === 200, r.data);
+  r = await req('POST', '/api/v2/daily-deposits/SB/confirm', {});
+  ok('全国区域负责人仍不能代店长确认存款', r.status === 403, r.status);
+  ok('菲律宾负责人重新登录', await login('t_ph', 'Ph#123456') === 200);
+
   r = await req('PUT', '/api/stores/SC', { city: 'Cebu' });
   ok('菲律宾负责人可修改门店 → 200', r.status === 200, r.data);
   r = await req('DELETE', '/api/stores/SB/managers/' + phMgrId);

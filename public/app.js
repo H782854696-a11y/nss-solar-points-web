@@ -98,18 +98,29 @@ function toast(message, type = 'info') {
 
 // =================== 语言切换 ===================
 function syncLangButtons() {
-  $$('#langBtn, #langBtnLogin').forEach(b => {
+  $$('#langBtn').forEach(b => {
     b.textContent = t('common.langSwitch');
     b.title = t('common.langSwitchTitle');
   });
+  const zhButton = $('#langBtnLogin');
+  const enButton = $('#langBtnLoginEn');
+  if (zhButton && enButton) {
+    const zh = getLang() === 'zh';
+    zhButton.classList.toggle('active', zh);
+    enButton.classList.toggle('active', !zh);
+    zhButton.setAttribute('aria-pressed', String(zh));
+    enButton.setAttribute('aria-pressed', String(!zh));
+  }
 }
 
 function bindLangButtons() {
   applyStatic();
   syncLangButtons();
-  $$('#langBtn, #langBtnLogin').forEach(b => {
+  $$('#langBtn').forEach(b => {
     b.addEventListener('click', () => setLang(getLang() === 'zh' ? 'en' : 'zh'));
   });
+  $('#langBtnLogin')?.addEventListener('click', () => setLang('zh'));
+  $('#langBtnLoginEn')?.addEventListener('click', () => setLang('en'));
   onChange(() => {
     syncLangButtons();
     /* 2026-10-07 i18n 修复：语言切换时必须重新应用 data-i18n，
@@ -302,15 +313,15 @@ const SCREEN_PERMS = {
   sheets:    'sync.view',       // 云同步状态
   db:        'db.view',         // 数据主库
   audit:     'system.audit.view', // 审计日志（沿用既有权限，仅 admin）
-  accounts:  'system.user.view',  // 账号管理（列表沿用既有权限；启用/停用另需 system.user.edit，
-                                  //   两者当前都只授 admin。本页不新造权限。）
+  // accounts 不登记权限：它同时承载每位登录人的个人资料与改密；
+  // 全员账号列表和管理动作在 renderAccounts 内另行以 system.user.view / edit 把关。
   storeBiz:  'report.view',       // 门店经营（复用报表读取权限，零新增 RBAC）
   memberBiz: 'report.view',       // 会员经营（同上）
 };
 
 // 经营总览与经营报表不再作为独立板块开放；底层实现和数据保留以便回滚。
 const RETIRED_OPERATION_SCREENS = new Set(['dashboard', 'reports', 'storeBiz', 'memberBiz']);
-const HOME_SCREEN_ORDER = ['controlCenter', 'stores', 'db', 'audit', 'accounts', 'account'];
+const HOME_SCREEN_ORDER = ['controlCenter', 'stores', 'db', 'audit', 'accounts'];
 
 // 2026-10-07：门店「三板块」对店长角色关闭。
 // 背景：店长在旧菜单下会看到「门店管理 / 门店跟进 / 组织与流程设置」，
@@ -409,8 +420,8 @@ function bindSidebar() {
   const userBlock = $('#userBlock');
   if (userBlock) {
     userBlock.setAttribute('role', 'button'); userBlock.tabIndex = 0;
-    userBlock.setAttribute('aria-label', ccText('Account settings', '账号设置'));
-    userBlock.addEventListener('click', () => { setScreen('account'); closeNav(); });
+    userBlock.setAttribute('aria-label', ccText('Account management', '账号管理'));
+    userBlock.addEventListener('click', () => { setScreen('accounts'); closeNav(); });
     userBlock.addEventListener('keydown', event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); userBlock.click(); } });
   }
 }
@@ -484,6 +495,8 @@ function updateHeaderCrumb() {
 }
 
 function setScreen(name) {
+  // 兼容旧书签：账号设置已合并到账号管理。
+  if (name === 'account') name = 'accounts';
   // 兜底拦截：侧栏入口虽然隐藏了，但如果页面结构被改动、或账号切换后没重绘，
   // 仍可能走到这里 —— 无权限时一律回落到仪表盘。
   if (!canAccessScreen(name)) name = homeScreen();
@@ -499,6 +512,7 @@ function setScreen(name) {
 async function renderScreen() {
   if (state.me?.mustChangePassword) { renderMandatoryPasswordChange(); return; }
   stopSheetsLive();
+  if (state.screen === 'account') state.screen = 'accounts';
   if (!canAccessScreen(state.screen)) state.screen = homeScreen();
   const root = $('#content');
   root.innerHTML = state.screen === 'controlCenter' ? `<div class="cc-loading" role="status" aria-label="${ccText('Loading control center', '正在加载中控平台')}"><div class="cc-loading-title"></div><div class="cc-loading-kpis">${'<div class="cc-loading-card"></div>'.repeat(4)}</div><div class="cc-loading-panel"></div></div>` : `<div class="card" style="text-align:center;color:#9AA8A2;padding:40px;">${t('common.loading')}</div>`;
@@ -518,7 +532,6 @@ async function renderScreen() {
     else if (state.screen === 'db') await renderDb(root);
     else if (state.screen === 'audit') await renderAudit(root);
     else if (state.screen === 'accounts') await renderAccounts(root);
-    else if (state.screen === 'account') renderAccount(root);
   } catch (e) {
     root.innerHTML = `<div class="card"><p>${t('common.loadFailed', { msg: escapeHtml(e.message) })}</p><button class="btn btn-primary" type="button" id="screenRetry">${ccText('Retry', '重试')}</button></div>`;
     root.querySelector('#screenRetry').addEventListener('click', () => { renderScreen(); });
@@ -608,10 +621,14 @@ const CONTROL_TYPES = {
   payment: ['Payment request', '付款申请'], transfer: ['Stock transfer', '库存调拨'],
   stocktake: ['Stocktake', '库存盘点'], stock_adjustment: ['Stock adjustment', '库存调整'],
   price_adjustment: ['Price adjustment', '价格调整'], store_remediation: ['Store remediation', '门店整改'],
+  store_receipt: ['Store receipt confirmation', '门店收货确认'], discount_request: ['Order discount request', '订单优惠审批'],
+  purchase_request: ['Purchase request', '采购申请'], expense_reimbursement: ['Expense reimbursement', '费用报销'],
 };
 // 仍在流转、需要继续审批/执行/关闭的流程类型（含已停用但存量未完结的）
 const ACTIVE_CONTROL_TYPES = {
   stocktake: CONTROL_TYPES.stocktake, store_remediation: CONTROL_TYPES.store_remediation,
+  store_receipt: CONTROL_TYPES.store_receipt, discount_request: CONTROL_TYPES.discount_request,
+  purchase_request: CONTROL_TYPES.purchase_request, expense_reimbursement: CONTROL_TYPES.expense_reimbursement,
 };
 // 2026-10-07：门店整改**停用新建**。
 // 存量申请仍要留在列表里、仍可审批 / 指派 / 提交复查 / 关闭，所以不能从
@@ -620,6 +637,11 @@ const ACTIVE_CONTROL_TYPES = {
 // CREATABLE_CONTROL_TYPES 决定能否发起，二者刻意分开。
 const CREATABLE_CONTROL_TYPES = {
   stocktake: CONTROL_TYPES.stocktake,
+  store_remediation: CONTROL_TYPES.store_remediation,
+  store_receipt: CONTROL_TYPES.store_receipt,
+  discount_request: CONTROL_TYPES.discount_request,
+  purchase_request: CONTROL_TYPES.purchase_request,
+  expense_reimbursement: CONTROL_TYPES.expense_reimbursement,
 };
 const CONTROL_FIELDS = [
   ['warehouseName', 'Warehouse name', '仓库名称（手动填写）', 'text'],
@@ -632,10 +654,22 @@ const CONTROL_FIELDS = [
   ['dueDate', 'Due date', '整改期限', 'date'],
   ['assigneeId', 'Responsible person', '整改负责人（账号）', 'select'],
   ['reason', 'Reason / details', '原因 / 说明', 'textarea'],
+  ['receiptDate', 'Receipt date', '收货日期', 'date'],
+  ['receiptSummary', 'Receipt summary', '收货内容', 'textarea'],
+  ['orderNumber', 'Order number', '订单编号', 'text'],
+  ['discountReason', 'Discount reason', '优惠原因', 'textarea'],
+  ['purchaseSummary', 'Purchase summary', '采购内容', 'textarea'],
+  ['expenseDate', 'Expense date', '报销日期', 'date'],
+  ['expenseCategory', 'Expense category', '费用类别', 'text'],
+  ['amount', 'Amount', '金额', 'number'],
 ];
 const CONTROL_FIELDS_BY_TYPE = {
   stocktake: ['warehouseName','batchNumber','countArea','counterName','countDate','reason'],
   store_remediation: ['storeName','issue','dueDate','assigneeId','reason'],
+  store_receipt: ['storeName','receiptDate','receiptSummary'],
+  discount_request: ['orderNumber','amount','discountReason'],
+  purchase_request: ['purchaseSummary','amount','reason'],
+  expense_reimbursement: ['expenseDate','expenseCategory','amount','reason'],
 };
 const ccText = (en, zh) => String(locale()).toLowerCase().startsWith('zh') ? zh : en;
 const ccStatus = s => ({ pending_approval: ccText('Pending approval', '待审批'), approved: ccText('Approved', '已批准'), rejected: ccText('Rejected', '已驳回'), returned: ccText('Returned for changes', '退回修改'), execution_pending: ccText('Execution in progress', '整改中'), awaiting_review: ccText('Awaiting review', '待复查'), completed: ccText('Completed', '已完成'), cancelled: ccText('Cancelled', '已撤回'), open: ccText('Open', '待处理'), in_progress: ccText('In progress', '进行中') }[s] || s);
@@ -925,14 +959,50 @@ async function renderControlCenter(root) {
   const allWorkflows = workflowData.items || [], workflows = allWorkflows.filter(item => ACTIVE_CONTROL_TYPES[item.type]), archivedWorkflows = allWorkflows.filter(item => !ACTIVE_CONTROL_TYPES[item.type]);
   const tasks = taskData.items || [], orgs = orgData.items || [];
   const definitions = definitionData.items || [];
+  const directoryData = mayViewOrg ? await Promise.all([GET('/api/v2/departments'), GET('/api/v2/positions')]) : [{ items: [] }, { items: [] }];
+  const departments = directoryData[0].items || [], positions = directoryData[1].items || [];
   const employees = employeeData.items || [], notices = noticeData.items || [], stores = storeData.items || [];
+  const approverAccounts = (accountData.items || []).filter(x => !x.disabled);
+  const employeeForAccount = account => employees.find(employee => employee.userId === account.id || employee.id === account.employeeId);
+  const approverPeople = approverAccounts.filter(account => !account.disabled && ['admin','owner','philippines_manager'].includes(account.role === 'manager' ? 'store_manager' : account.role)).map(account => {
+    const employee = employeeForAccount(account), position = positions.find(item => item.id === employee?.positionId), department = departments.find(item => item.id === (employee?.departmentId || position?.departmentId)), organization = orgs.find(item => item.id === (employee?.organizationId || department?.organizationId));
+    return { ...account, employee, position, department, organization, label: [organization?.name, department?.name, position?.name, account.name || account.username].filter(Boolean).join(' · ') };
+  });
+  const routePersonButton = person => `<button type="button" class="cc-route-person" data-route-token="user:${escapeHtml(person.id)}" aria-pressed="false"><span class="cc-route-person-avatar">${escapeHtml(String(person.name || person.username || '?').trim().slice(0, 1).toUpperCase())}</span><span><strong>${escapeHtml(person.name || person.username)}</strong><small>${escapeHtml([person.position?.name, person.username].filter(Boolean).join(' · '))}</small></span><i aria-hidden="true">＋</i></button>`;
+  const approverPickerTree = `${orgs.map(organization => {
+    const people = approverPeople.filter(person => person.organization?.id === organization.id), departmentIds = [...new Set(people.map(person => person.department?.id).filter(Boolean))];
+    const departmentGroups = departmentIds.map(id => {
+      const department = departments.find(item => item.id === id), departmentPeople = people.filter(person => person.department?.id === id), positionIds = [...new Set(departmentPeople.map(person => person.position?.id).filter(Boolean))];
+      const positionGroups = positionIds.map(positionId => {
+        const position = positions.find(item => item.id === positionId), rows = departmentPeople.filter(person => person.position?.id === positionId).map(routePersonButton).join('');
+        return `<details open><summary><strong>${escapeHtml(position?.name || ccText('Position', '职位'))}</strong><small>${rows ? departmentPeople.filter(person => person.position?.id === positionId).length : 0}</small></summary><div class="cc-route-person-list">${rows}</div></details>`;
+      }).join('');
+      const directRows = departmentPeople.filter(person => !person.position?.id).map(routePersonButton).join('');
+      return `<details open><summary><strong>${escapeHtml(department?.name || ccText('Department', '部门'))}</strong><small>${departmentPeople.length}</small></summary><div class="cc-tree-children">${positionGroups}${directRows}</div></details>`;
+    }).join('');
+    const withoutDepartment = people.filter(person => !person.department?.id).map(routePersonButton).join('');
+    return `<details open class="cc-route-org"><summary><strong>${escapeHtml(organization.name)}</strong><small>${people.length}</small></summary><div class="cc-tree-children">${departmentGroups}${withoutDepartment}</div></details>`;
+  }).join('')}${approverPeople.some(person => !person.organization?.id) ? `<details open class="cc-route-org"><summary><strong>${ccText('Not assigned in organization', '未关联组织人员')}</strong><small>${approverPeople.filter(person => !person.organization?.id).length}</small></summary><div class="cc-route-person-list">${approverPeople.filter(person => !person.organization?.id).map(routePersonButton).join('')}</div></details>` : ''}`;
+  const renderOrganizationPosition = position => {
+    const positionEmployees = employees.filter(employee => employee.positionId === position.id);
+    return `<details open><summary><span class="cc-tree-folder">▾</span><strong>${escapeHtml(position.name)}</strong><small>${ccText('Position', '职位')}</small></summary><div class="cc-tree-people">${positionEmployees.length ? positionEmployees.map(employee => `<span>◉ ${escapeHtml(employee.name)}<small>${escapeHtml(employee.employeeCode)}</small></span>`).join('') : `<span class="cc-muted">${ccText('No person assigned', '暂无人员')}</span>`}</div></details>`;
+  };
+  const organizationTree = `<div class="cc-org-tree">${orgs.map(organization => {
+    const orgDepartments = departments.filter(department => department.organizationId === organization.id);
+    const departmentNodes = orgDepartments.map(department => {
+      const departmentPositions = positions.filter(position => position.departmentId === department.id), directEmployees = employees.filter(employee => employee.departmentId === department.id && !employee.positionId);
+      return `<details open><summary><span class="cc-tree-folder">▾</span><strong>${escapeHtml(department.name)}</strong><small>${ccText('Department', '部门')}</small></summary><div class="cc-tree-children">${departmentPositions.map(renderOrganizationPosition).join('')}${directEmployees.map(employee => `<span class="cc-tree-person">◉ ${escapeHtml(employee.name)}<small>${escapeHtml(employee.employeeCode)}</small></span>`).join('')}${!departmentPositions.length && !directEmployees.length ? `<div class="cc-muted">${ccText('No positions or people assigned', '暂无职位或人员')}</div>` : ''}</div></details>`;
+    }).join('');
+    const orphanPositions = '';
+    const directEmployees = employees.filter(employee => employee.organizationId === organization.id && !employee.departmentId && !employee.positionId).map(employee => `<span class="cc-tree-person">◉ ${escapeHtml(employee.name)}<small>${escapeHtml(employee.employeeCode)}</small></span>`).join('');
+    return `<details open><summary><span class="cc-tree-folder">▾</span><strong>${escapeHtml(organization.name)}</strong><small>${escapeHtml(organization.code)}</small></summary><div class="cc-tree-children">${departmentNodes}${orphanPositions ? `<details open><summary><span class="cc-tree-folder">▾</span><strong>${ccText('Positions without a department', '未关联部门的职位')}</strong></summary><div class="cc-tree-children">${orphanPositions}</div></details>` : ''}${directEmployees}${!orgDepartments.length && !orphanPositions && !directEmployees ? `<div class="cc-muted">${ccText('No departments configured', '暂无部门')}</div>` : ''}</div></details>`;
+  }).join('')}${departments.some(department => !orgs.some(organization => organization.id === department.organizationId)) || positions.some(position => !departments.some(department => department.id === position.departmentId)) || employees.some(employee => !employee.organizationId && !employee.departmentId && !employee.positionId) ? `<details open><summary><span class="cc-tree-folder">▾</span><strong>${ccText('Not assigned in organization', '未关联组织架构')}</strong></summary><div class="cc-tree-children">${departments.filter(department => !orgs.some(organization => organization.id === department.organizationId)).map(department => `<details open><summary><span class="cc-tree-folder">▾</span><strong>${escapeHtml(department.name)}</strong><small>${ccText('Department', '部门')}</small></summary><div class="cc-tree-children">${positions.filter(position => position.departmentId === department.id).map(renderOrganizationPosition).join('') || `<span class="cc-muted">${ccText('No positions configured', '暂无职位')}</span>`}</div></details>`).join('')}${positions.filter(position => !departments.some(department => department.id === position.departmentId)).map(renderOrganizationPosition).join('')}${employees.filter(employee => !employee.organizationId && !employee.departmentId && !employee.positionId).map(employee => `<span class="cc-tree-person">◉ ${escapeHtml(employee.name)}<small>${escapeHtml(employee.employeeCode)}</small></span>`).join('')}</div></details>` : ''}</div>`;
   // 组织架构工作区（2026-10-08）：区域档案 + 各区域门店数（须在 stores 声明之后）
   const orgRegions = regionData.items || [];
   const storesByRegion = new Map();
   stores.forEach(s => { if (s.regionId) storesByRegion.set(s.regionId, (storesByRegion.get(s.regionId) || 0) + 1); });
   const announcements = announcementData.items || [];
   const leadAnnouncement = announcements.find(x => x.status === 'published');
-  const approverAccounts = (accountData.items || []).filter(x => !x.disabled);
   const remediationCounts = workflowData.countsByType?.store_remediation || {};
   const openRemediationCount = ['pending_approval','returned','approved','execution_pending','awaiting_review'].reduce((sum, status) => sum + Number(remediationCounts[status] || 0), 0);
   const metric = (label, value, area, tone, actionable = false) => {
@@ -1128,24 +1198,34 @@ async function renderControlCenter(root) {
     return `<label class="cc-field"><span>${ccText(en, zh)}</span>${type === 'textarea' ? `<textarea name="${key}" rows="2"></textarea>` : `<input name="${key}" type="${type}" ${['amount','estimatedAmount','oldPrice','newPrice'].includes(key) ? 'min="0" step="0.01"' : ['quantity','countedQuantity'].includes(key) ? 'min="0.001" step="0.001"' : key === 'quantityDelta' ? 'step="0.001"' : ''}/>`}</label>`;
   }).join('');
   const initialProcessType = Object.keys(CREATABLE_CONTROL_TYPES)[0];
+  const homeDate = new Intl.DateTimeFormat(locale(), { year: 'numeric', month: 'long', day: 'numeric', weekday: 'long' }).format(new Date());
+  const homeName = tName(state.me?.name || state.me?.username || ccText('Administrator', '管理员'));
+  const taskTotal = Number(taskCounts.open || 0) + Number(taskCounts.in_progress || 0) + Number(taskCounts.completed || 0);
+  const taskDonePercent = taskTotal ? Math.round(Number(taskCounts.completed || 0) / taskTotal * 100) : 0;
+  const operationStoreCount = stores.length;
   root.innerHTML = `
-    <div class="page-header cc-page-header"><div class="page-header-text"><div class="page-title">${ccText('Control Platform', '中控平台')}</div><div class="page-subtitle">${ccText('Approvals, tasks, store follow-up and announcements', '审批流程、任务协作、门店跟进与内容公告')}</div></div><time>${escapeHtml(new Date().toLocaleDateString())}</time></div>
+    <div class="cc-home-hero">
+      <div><div class="cc-home-eyebrow">${ccText('SOLARPOINTS V2 · MANAGEMENT WORKSPACE', 'SOLARPOINTS V2 · 企业管理工作台')}</div><h1>${ccText('Welcome back,', '欢迎回来，')} ${escapeHtml(homeName)}</h1><p>${ccText('Here is your company operations at a glance.', '这里是今天的公司运营概览。')}</p></div>
+      <div class="cc-home-date"><span>${escapeHtml(homeDate)}</span><strong>${ccText('Clean Energy · Brighter Tomorrow', '用清洁能源，点亮更美好的明天')}</strong></div>
+    </div>
     <div class="cc-announcement-ticker"><span aria-hidden="true">📢</span><span class="cc-ticker-track"><span class="cc-ticker-content">${leadAnnouncement ? escapeHtml(leadAnnouncement.title) : ccText('No important announcement yet', '暂无重要公告')}</span></span><button type="button" data-cc-jump="announcements">${ccText('View all', '查看全部')} →</button></div>
-    <section class="cc-overview"><div class="cc-overview-grid">
+    <section class="cc-overview cc-admin-home"><div class="cc-overview-grid">
       ${mayViewWorkflows ? metric(ccText('My pending approvals', '待我审批'), count(workflowData.pendingForMe), 'approvals', 'warning', true) : ''}
       ${mayViewTasks ? metric(ccText('Open tasks', '未完成任务'), taskData.counts ? count(taskData.counts.open || 0) + count(taskData.counts.in_progress || 0) : NaN, 'collaboration', 'brand') : ''}
       ${mayViewWorkflows ? metric(ccText('Open store remediation', '未完成门店整改'), workflowData.countsByType ? openRemediationCount : NaN, 'approvals', 'danger') : ''}
       ${metric(ccText('Unread notifications', '未读通知'), count(noticeData.unread), 'collaboration', 'neutral')}
+      ${can('purchase.view') ? metric(ccText('ETA within 7 days', '预计 7 天内到达'), purchaseEtaSoon, 'purchasing', 'brand') : ''}
     </div>
     <div class="cc-dashboard-grid">
-      <section class="card cc-dashboard-panel cc-actions-panel"><h3>${ccText('Quick actions', '快捷办理')}</h3><div class="cc-quick-actions">
+      <section class="card cc-dashboard-panel cc-actions-panel cc-home-actions"><h3>${ccText('Quick actions', '快捷办理')}</h3><div class="cc-quick-actions">
         ${can('workflow.create') ? `<button type="button" data-cc-quick="stocktake"><span aria-hidden="true">▤</span><span>${ccText('Start stocktake request', '发起盘点申请')}</span><b aria-hidden="true">→</b></button>` : ''}
         ${can('task.create') ? `<button type="button" data-cc-quick="task"><span aria-hidden="true">☑</span><span>${ccText('Create collaboration task', '创建协作任务')}</span><b aria-hidden="true">→</b></button>` : ''}
         ${can('announcement.manage') ? `<button type="button" data-cc-quick="announcement"><span aria-hidden="true">✦</span><span>${ccText('Publish announcement', '发布内容公告')}</span><b aria-hidden="true">→</b></button>` : ''}
       </div></section>
-      <section class="card cc-dashboard-panel"><h3>${ccText('Recent matters', '最近事项')}</h3><div class="cc-dashboard-list">${recentMatters.map(x => `<button type="button" data-cc-jump="${x.area}" data-cc-recent><span><em>${escapeHtml(x.type)}</em><strong>${escapeHtml(x.title)}</strong><small>${escapeHtml(formattedDate(x.date))}</small></span><span class="cc-list-status">${escapeHtml(x.status)} →</span></button>`).join('') || `<span class="cc-muted">${ccText('No recent matters', '暂无最近事项')}</span>`}</div></section>
-      <section class="card cc-dashboard-panel"><h3>${ccText('Reminders', '待办提醒')}</h3><div class="cc-dashboard-list">${mayViewWorkflows ? `<button type="button" data-cc-jump="approvals" data-cc-actionable-jump><span>${ccText('Pending approvals', '待我审批')}</span><strong class="cc-count-badge">${escapeHtml(String(workflowData.pendingForMe ?? ccText('Not available','未能读取')))}</strong></button>` : ''}${mayViewTasks ? `<button type="button" data-cc-jump="collaboration"><span>${ccText('Open tasks', '未完成任务')}</span><strong class="cc-count-badge">${taskData.counts ? Number(taskData.counts.open || 0) + Number(taskData.counts.in_progress || 0) : ccText('Not available','未能读取')}</strong></button>` : ''}<button type="button" data-cc-jump="collaboration"><span>${ccText('Unread notifications', '未读通知')}</span><strong class="cc-count-badge">${escapeHtml(String(noticeData.unread ?? ccText('Not available','未能读取')))}</strong></button></div></section>
+      <section class="card cc-dashboard-panel cc-home-today"><div class="cc-home-panel-head"><h3>${ccText('Today’s priorities', '今日待办事项')}</h3><button type="button" data-cc-jump="approvals" data-cc-actionable-jump>${ccText('Open worklist', '打开工作清单')} →</button></div><div class="cc-dashboard-list">${recentMatters.map(x => `<button type="button" data-cc-jump="${x.area}" data-cc-recent><span><em>${escapeHtml(x.type)}</em><strong>${escapeHtml(x.title)}</strong><small>${escapeHtml(formattedDate(x.date))}</small></span><span class="cc-list-status">${escapeHtml(x.status)} →</span></button>`).join('') || `<span class="cc-muted">${ccText('No recent matters', '暂无最近事项')}</span>`}</div></section>
+      <section class="card cc-dashboard-panel cc-home-progress"><h3>${ccText('Task completion', '任务完成情况')}</h3><div class="cc-home-progress-value"><strong>${taskDonePercent}%</strong><span>${ccText('completed', '已完成')}</span></div><div class="cc-home-progress-track"><i style="width:${taskDonePercent}%"></i></div><div class="cc-home-legend"><span><i class="done"></i>${ccText('Completed', '已完成')} <b>${Number(taskCounts.completed || 0)}</b></span><span><i class="active"></i>${ccText('In progress', '进行中')} <b>${Number(taskCounts.in_progress || 0)}</b></span><span><i class="waiting"></i>${ccText('Open', '待处理')} <b>${Number(taskCounts.open || 0)}</b></span></div><div class="cc-home-source">${ccText('Based on tasks visible to your account', '统计范围按当前账号权限过滤')}</div></section>
       ${mayViewWorkflows ? `<section class="card cc-dashboard-panel"><h3>${ccText('Approval status', '审批状态分布')}</h3>${renderStatusRing(workflowData.counts)}<div class="cc-ring-source">${ccText('Source: workflow counts', '来源：审批记录实时统计')}</div></section>` : ''}
+      <section class="card cc-dashboard-panel cc-home-operations"><div class="cc-home-panel-head"><h3>${ccText('Operations at a glance', '运营概况')}</h3><button type="button" data-cc-jump="storeops">${ccText('View details', '查看详情')} →</button></div><div class="cc-home-op-grid">${can('store.view') ? `<button type="button" data-cc-jump="storeops"><span>${ccText('Stores', '门店')}</span><strong>${operationStoreCount}</strong></button>` : ''}${can('store.view') ? `<button type="button" data-cc-jump="storeops"><span>${ccText('Inspection records', '巡检记录')}</span><strong>${Number(operationData.pages?.inspections?.total || 0)}</strong></button>` : ''}${can('store.view') ? `<button type="button" data-cc-jump="storeops"><span>${ccText('Issue records', '问题记录')}</span><strong>${Number(operationData.pages?.issues?.total || 0)}</strong></button>` : ''}${can('org.view') ? `<button type="button" data-cc-jump="org"><span>${ccText('Employees', '员工')}</span><strong>${employees.length}</strong></button>` : ''}</div><div class="cc-home-source">${ccText('Counts reflect records available in the current system.', '数据为当前系统可读取记录数，不代表门店完成率。')}</div></section>
     </div><div class="cc-detail-heading" hidden><strong id="ccDetailTitle"></strong><small id="ccDetailSubtitle"></small></div><div class="cc-workspace-stats" hidden></div></section>
     <section class="cc-section cc-ann-section" data-cc-area="announcements">
       <div class="cc-ann-head">
@@ -1171,11 +1251,11 @@ async function renderControlCenter(root) {
     </section>
     ${can('workflow.create') ? `<section class="card cc-section" data-cc-area="approvals"><h3>${ccText('New request', '新建申请')}</h3><form id="ccWorkflowForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Process type', '流程类型')}</span><select name="type">${Object.entries(CREATABLE_CONTROL_TYPES).map(([k,v]) => `<option value="${k}">${escapeHtml(v[String(locale()).toLowerCase().startsWith('zh') ? 1 : 0])}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Title', '标题')}</span><input name="title" required maxlength="180"/></label><div id="ccWorkflowFields" class="cc-form-grid cc-wide">${renderWorkflowFields(initialProcessType)}</div><div id="ccStocktakePanel" data-stocktake-editor="new" class="cc-wide" hidden></div></div><button class="btn btn-primary" type="submit">${ccText('Submit for approval', '提交审批')}</button></form></section>` : ''}
     ${can('task.create') ? `<section class="card cc-section" data-cc-area="collaboration"><h3>${ccText('Create task', '创建任务')}</h3><form id="ccTaskForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Task title', '任务名称')}</span><input name="title" required maxlength="180"/></label><label class="cc-field"><span>${ccText('Assignee', '负责人')}</span><select name="assigneeId"><option value="">${ccText('Unassigned', '暂不指派')}</option>${assignees.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}${a.username ? ` · ${escapeHtml(a.username)}` : ''}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">—</option>${stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Due date', '截止日期')}</span><input name="dueAt" type="date"/></label><label class="cc-field"><span>${ccText('Priority', '优先级')}</span><select name="priority"><option value="normal">${ccText('Normal', '普通')}</option><option value="high">${ccText('High', '高')}</option><option value="urgent">${ccText('Urgent', '紧急')}</option><option value="low">${ccText('Low', '低')}</option></select></label><label class="cc-field cc-wide"><span>${ccText('Description', '任务说明')}</span><textarea name="description" rows="2"></textarea></label><label class="cc-field cc-wide"><span>${ccText('Checklist (one item per line)', '执行清单（每行一项）')}</span><textarea name="checklist" rows="4" maxlength="12000" placeholder="${ccText('Prepare materials\nConfirm completion\nUpload evidence', '准备资料\n确认完成情况\n上传凭证')}"></textarea></label></div><button class="btn btn-primary" type="submit">${ccText('Create task', '创建任务')}</button></form></section>` : ''}
-    ${mayViewOrg ? `<section class="cc-section" data-cc-area="org"><h3>${ccText('Organizations', '组织档案')}</h3><p class="cc-meta">${ccText('Group · China management center · Philippines management center', '集团 · 中国管理中心 · 菲律宾管理中心')}</p><div class="cc-org-grid">${orgs.length ? orgs.map(o => `<article class="card cc-org-card"><div class="cc-card-top"><strong>${escapeHtml(o.name)}</strong><span class="cc-status ${String(o.countryCode).toUpperCase() === 'CN' ? 'cc-status-cn' : ''}">${escapeHtml(String(o.countryCode || 'PH').toUpperCase())}</span></div><div class="cc-meta">${escapeHtml(o.code)}${o.timezone ? ` · ${escapeHtml(o.timezone)}` : ''}</div></article>`).join('') : `<span class="cc-muted">${ccText('No organization records configured yet', '尚未配置组织档案')}</span>`}</div>${can('org.manage') ? `<form id="ccOrgForm" class="cc-inline-form"><input name="code" required placeholder="CN-HQ"/><input name="name" required placeholder="${ccText('Organization name', '组织名称')}"/><select name="countryCode"><option value="CN">CN</option><option value="PH" selected>PH</option></select><button class="btn btn-sm btn-primary">${ccText('Add', '添加')}</button></form>` : ''}</section>` : ''}
-    ${mayViewOrg ? `<section class="card cc-section" data-cc-area="org"><h3>${ccText('Regions', '区域')}</h3><p class="cc-meta">${ccText('Regions group stores for scope control.', '区域用于门店的管辖范围划分。')}</p><div class="cc-org-grid">${orgRegions.length ? orgRegions.map(r => `<article class="card cc-org-card"><div class="cc-card-top"><strong>${escapeHtml(r.name)}</strong><span class="cc-status">${escapeHtml(String(r.countryCode || 'PH').toUpperCase())}</span></div><div class="cc-meta">${escapeHtml(r.code)} · ${ccText('Stores', '门店')} ${storesByRegion.get(r.id) || 0}</div></article>`).join('') : `<span class="cc-muted">${ccText('No regions configured yet', '尚未配置区域')}</span>`}</div></section>` : ''}
-    ${can('staff.view') ? `<section class="card cc-section" data-cc-area="governance"><h3>${ccText('Employee directory', '员工名册')}</h3>${employees.length ? employees.map(x => `<span class="cc-chip">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)} ${can('staff.edit') ? `<button type="button" class="btn btn-sm" data-v2-edit-employee="${escapeHtml(x.id)}">${ccText('Edit', '编辑')}</button>` : ''}</span>`).join('') : `<span class="cc-muted">${ccText('No employee records configured yet', '尚无员工名册')}</span>`}${can('staff.create') ? `<form id="ccEmployeeForm" class="cc-inline-form"><input name="employeeCode" required placeholder="EMP-001"/><input name="name" required placeholder="${ccText('Employee name', '员工姓名')}"/><input name="phone" placeholder="${ccText('Phone', '电话')}"/><button class="btn btn-sm btn-primary">${ccText('Add', '添加')}</button></form>` : ''}</section>` : ''}
+    ${mayViewOrg ? `<section class="cc-section" data-cc-area="org"><h3>${ccText('Organization directory', '组织架构')}</h3><p class="cc-meta">${ccText('Organizations, departments and positions are managed here. Records in use cannot be deactivated until their dependencies are moved.', '在此维护组织、部门与职位。被人员或审批规则使用的记录必须先完成调整，才能停用。')}</p><div class="cc-org-grid">${orgs.map(o => `<article class="card cc-org-card"><strong>${escapeHtml(o.name)}</strong><div class="cc-meta">${escapeHtml(o.code)} · ${escapeHtml(o.countryCode || '')}</div>${can('org.manage') ? `<button class="btn btn-sm" data-directory-edit="organizations:${escapeHtml(o.id)}">${ccText('Edit', '编辑')}</button>` : ''}</article>`).join('')} ${departments.map(d => `<article class="card cc-org-card"><strong>${escapeHtml(d.name)}</strong><div class="cc-meta">${ccText('Department', '部门')} · ${escapeHtml(d.code)}</div>${can('org.manage') ? `<button class="btn btn-sm" data-directory-edit="departments:${escapeHtml(d.id)}">${ccText('Edit', '编辑')}</button>` : ''}</article>`).join('')} ${positions.map(p => `<article class="card cc-org-card"><strong>${escapeHtml(p.name)}</strong><div class="cc-meta">${ccText('Position', '职位')} · ${escapeHtml(p.code)}</div>${can('org.manage') ? `<button class="btn btn-sm" data-directory-edit="positions:${escapeHtml(p.id)}">${ccText('Edit', '编辑')}</button>` : ''}</article>`).join('')}</div>${can('org.manage') ? `<form id="ccOrgForm" class="cc-inline-form"><input name="code" required placeholder="ORG-001"/><input name="name" required placeholder="${ccText('Organization name', '组织名称')}"/><select name="countryCode"><option value="CN">CN</option><option value="PH" selected>PH</option></select><button class="btn btn-sm btn-primary">${ccText('Add organization', '添加组织')}</button></form><form data-directory-form="departments" class="cc-inline-form"><input name="code" required placeholder="DEPT-001"/><input name="name" required placeholder="${ccText('Department name', '部门名称')}"/><select name="organizationId"><option value="">${ccText('No organization', '不关联组织')}</option>${orgs.map(o => `<option value="${escapeHtml(o.id)}">${escapeHtml(o.name)}</option>`).join('')}</select><button class="btn btn-sm">${ccText('Add department', '添加部门')}</button></form><form data-directory-form="positions" class="cc-inline-form"><input name="code" required placeholder="POS-001"/><input name="name" required placeholder="${ccText('Position name', '职位名称')}"/><select name="departmentId"><option value="">${ccText('No department', '不关联部门')}</option>${departments.map(d => `<option value="${escapeHtml(d.id)}">${escapeHtml(d.name)}</option>`).join('')}</select><button class="btn btn-sm">${ccText('Add position', '添加职位')}</button></form>` : ''}</section>` : ''}
+    ${mayViewOrg ? `<section class="card cc-section" data-cc-area="org"><h3>${ccText('Regions and stores', '区域与门店')}</h3><p class="cc-meta">${ccText('Regions group stores for scope control.', '按区域展开查看门店，区域范围继续用于现有数据权限。')}</p><div class="cc-org-tree cc-region-tree">${orgRegions.length ? orgRegions.map(region => { const regionStores = stores.filter(store => store.regionId === region.id); return `<details open><summary><span class="cc-tree-folder">▾</span><strong>${escapeHtml(region.name)}</strong><small>${escapeHtml(region.code)} · ${regionStores.length} ${ccText('stores', '家门店')}</small></summary><div class="cc-tree-children">${regionStores.length ? regionStores.map(store => `<div class="cc-tree-store"><strong>${escapeHtml(tStore(store.name))}</strong><small>${escapeHtml(store.code || store.city || '')}</small></div>`).join('') : `<div class="cc-muted">${ccText('No stores assigned', '暂无门店')}</div>`}</div></details>`; }).join('') : `<span class="cc-muted">${ccText('No regions configured yet', '尚未配置区域')}</span>`}${stores.some(store => !store.regionId || !orgRegions.some(region => region.id === store.regionId)) ? `<details><summary><span class="cc-tree-folder">▸</span><strong>${ccText('Stores without a region', '未关联区域的门店')}</strong><small>${stores.filter(store => !store.regionId || !orgRegions.some(region => region.id === store.regionId)).length}</small></summary><div class="cc-tree-children">${stores.filter(store => !store.regionId || !orgRegions.some(region => region.id === store.regionId)).map(store => `<div class="cc-tree-store"><strong>${escapeHtml(tStore(store.name))}</strong><small>${escapeHtml(store.code || store.city || '')}</small></div>`).join('')}</div></details>` : ''}</div></section>` : ''}
+    ${can('staff.view') ? `<section class="card cc-section" data-cc-area="governance"><h3>${ccText('Employee directory', '员工名册')}</h3>${employees.length ? employees.map(x => `<span class="cc-chip">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)}${x.positionId ? ` · ${escapeHtml(positions.find(p => p.id === x.positionId)?.name || '')}` : ''} ${can('staff.edit') ? `<button type="button" class="btn btn-sm" data-v2-edit-employee="${escapeHtml(x.id)}">${ccText('Edit', '编辑')}</button>` : ''}</span>`).join('') : `<span class="cc-muted">${ccText('No employee records configured yet', '尚无员工名册')}</span>`}${can('staff.create') ? `<form id="ccEmployeeForm" class="cc-inline-form"><input name="employeeCode" required placeholder="EMP-001"/><input name="name" required placeholder="${ccText('Employee name', '员工姓名')}"/><select name="positionId"><option value="">${ccText('No position', '未指定职位')}</option>${positions.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('')}</select><input name="phone" placeholder="${ccText('Phone', '电话')}"/><button class="btn btn-sm btn-primary">${ccText('Add', '添加')}</button></form>` : ''}</section>` : ''}
     ${mayViewWorkflows ? `<section class="cc-section" data-cc-area="approvals"><h3>${ccText('Active approvals', '当前审批')}</h3><form id="ccWorkflowFilterForm" class="cc-workflow-filters"><input type="search" name="q" value="${escapeHtml(state.workflowFilters?.q || '')}" placeholder="${ccText('Search title, store, requester or document number', '搜索标题、门店、申请人或单据编号')}"/><select name="status"><option value="" ${!state.workflowFilters?.status ? 'selected' : ''}>${ccText('All statuses', '全部状态')}</option><option value="pending_approval" ${state.workflowFilters?.status === 'pending_approval' ? 'selected' : ''}>${ccText('Pending approval', '待审批')}</option><option value="returned" ${state.workflowFilters?.status === 'returned' ? 'selected' : ''}>${ccText('Returned', '已退回')}</option><option value="approved" ${state.workflowFilters?.status === 'approved' ? 'selected' : ''}>${ccText('Approved', '已批准')}</option><option value="execution_pending" ${state.workflowFilters?.status === 'execution_pending' ? 'selected' : ''}>${ccText('In execution', '执行中')}</option><option value="awaiting_review" ${state.workflowFilters?.status === 'awaiting_review' ? 'selected' : ''}>${ccText('Awaiting review', '待复查')}</option><option value="completed" ${state.workflowFilters?.status === 'completed' ? 'selected' : ''}>${ccText('Completed', '已完成')}</option><option value="rejected" ${state.workflowFilters?.status === 'rejected' ? 'selected' : ''}>${ccText('Rejected', '已驳回')}</option><option value="cancelled" ${state.workflowFilters?.status === 'cancelled' ? 'selected' : ''}>${ccText('Cancelled', '已撤回')}</option></select><select name="type"><option value="" ${!state.workflowFilters?.type ? 'selected' : ''}>${ccText('All process types', '全部流程类型')}</option>${Object.entries(CONTROL_TYPES).map(([key, names]) => `<option value="${escapeHtml(key)}" ${state.workflowFilters?.type === key ? 'selected' : ''}>${escapeHtml(names[String(locale()).toLowerCase().startsWith('zh') ? 1 : 0])}${ACTIVE_CONTROL_TYPES[key] ? '' : ` · ${ccText('Archived', '已归档')}`}</option>`).join('')}</select><button class="btn btn-sm" type="submit">${ccText('Search', '筛选')}</button><button class="btn btn-sm" type="button" data-workflow-reset>${ccText('Reset', '重置')}</button><button class="btn btn-sm" type="button" data-workflow-actionable>${state.workflowFilters?.actionable ? ccText('Show all requests', '显示全部申请') : ccText('My pending approvals', '待我审批')}</button><span class="cc-meta">${ccPageSummary(workflowData)}</span></form><div class="cc-approval-split"><aside class="cc-approval-side"><div class="cc-approval-list" data-cc-approval-list>${workflows.length ? approvalRows : `<div class="cc-muted">${ccText('No approval records', '暂无审批记录')}</div>`}</div></aside><div class="cc-approval-main" data-cc-approval-main><div class="cc-list">${flowCards || ccEmptyState(ccText('No approval records', '暂无审批记录'), ccText('New requests will appear here.', '新申请提交后会显示在这里。'), can('workflow.create') ? ccText('Create request', '新建申请') : '', 'stocktake')}</div></div></div><div class="cc-actions cc-workflow-pager">${ccPagerButtons('workflow', workflowData)}</div>${archivedWorkflows.length ? `<details class="cc-archive"><summary>${ccText('Archived request types', '已停用流程的历史记录')} (${archivedWorkflows.length})</summary><p>${ccText('These records are retained for audit and are read-only.', '这些历史记录仅供审计查阅，不再审批或重新提交。')}</p><div class="cc-list">${archivedWorkflows.map(w => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(CONTROL_TYPES[w.type]?.[String(locale()).toLowerCase().startsWith('zh') ? 1 : 0] || w.type)} · ${escapeHtml(w.title)}</strong>${ccStatusBadge(w.status)}</div><div class="cc-meta">${escapeHtml(w.createdByName || '')} · ${escapeHtml(new Date(w.createdAt).toLocaleString())}</div><div class="cc-meta">${escapeHtml(JSON.stringify(Object.fromEntries(Object.entries(w.form || {}).filter(([key]) => key !== 'items'))))}</div>${(w.history || []).length ? `<details class="cc-history"><summary>${ccText('History', '历史记录')}</summary>${w.history.map(h => `<div class="cc-meta">${escapeHtml(h.actorName || '')} · ${escapeHtml(h.action)} · ${escapeHtml(new Date(h.createdAt).toLocaleString())}${h.note ? ` · ${escapeHtml(h.note)}` : ''}</div>`).join('')}</details>` : ''}</article>`).join('')}</div></details>` : ''}</section>` : ''}
-    ${can('workflow.configure') ? `<section class="card cc-section" data-cc-area="governance"><h3>${ccText('Approval route settings', '审批路径设置')}</h3><p>${ccText('Configure the approval steps for stocktake and store remediation.', '配置库存盘点与门店整改的审批步骤。')}</p><form id="ccDefinitionForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Process type', '流程类型')}</span><select name="type">${Object.entries(CREATABLE_CONTROL_TYPES).map(([k,v]) => `<option value="${k}">${escapeHtml(v[String(locale()).toLowerCase().startsWith('zh') ? 1 : 0])}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Approval steps', '审批步骤')}</span><textarea name="steps" id="ccApprovalSteps" rows="4" placeholder="philippines_manager\nowner"></textarea></label><label class="cc-field"><span>${ccText('Approval deadline (hours)', '审批时限（小时）')}</span><input name="slaHours" type="number" min="1" max="720" step="1" placeholder="${ccText('Blank disables reminders', '留空表示不设置时限')}"/></label></div><div class="cc-inline-form"><select id="ccApproverToken"><optgroup label="${ccText('Roles', '系统角色')}">${['admin','owner','philippines_manager'].map(role => `<option value="${escapeHtml(role)}">${escapeHtml(roleLabel(role))} · ${role}</option>`).join('')}</optgroup>${approverAccounts.filter(x => x.id && ['admin','owner','philippines_manager'].includes(x.role === 'manager' ? 'store_manager' : x.role) && can('system.user.view')).length ? `<optgroup label="${ccText('User accounts', '指定账号')}">${approverAccounts.filter(x => x.id && ['admin','owner','philippines_manager'].includes(x.role === 'manager' ? 'store_manager' : x.role) && can('system.user.view')).map(x => `<option value="user:${escapeHtml(x.id)}">${escapeHtml(x.name || x.username)} · ${escapeHtml(x.username)}</option>`).join('')}</optgroup>` : ''}</select><button type="button" class="btn btn-sm" id="ccApproverAdd">${ccText('Add as step', '添加为一步')}</button></div><p class="cc-meta">${ccText('One line is one sequential step. Comma-separated approvers share that step and any one can approve. Prefix a line with all: to require everyone. Individual accounts can also be entered as user:ID. New requests use a snapshot; saved changes affect new requests.', '每行代表一个顺序审批步骤。同一行逗号分隔多个审批人，任意一人通过即可；行首加 all: 表示需要全部通过。指定账号格式为 user:账号ID。新申请使用流程快照，修改只影响之后提交的申请。')}</p><div id="ccApprovalPreview" class="cc-meta" aria-live="polite"></div><p class="cc-meta">${ccText('When a step exceeds this time, current approvers receive one in-app reminder. Leave blank to disable the approval timer.', '超过时限后，当前步骤审批人会收到一次站内提醒；留空则不启用审批计时。')}</p><button class="btn btn-primary">${ccText('Save route', '保存审批路径')}</button></form></section>` : ''}
+    ${can('workflow.configure') ? `<section class="card cc-section" data-cc-area="governance"><h3>${ccText('Approval route settings', '审批路径设置')}</h3><p>${ccText('Select an eligible approver from the organization tree, then add them as a step or to the current step.', '在组织架构中选择有审批权限的具体人员，再添加为新步骤或加入当前步骤。')}</p><form id="ccDefinitionForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Process type', '流程类型')}</span><select name="type">${Object.entries(CREATABLE_CONTROL_TYPES).map(([k,v]) => `<option value="${k}">${escapeHtml(v[String(locale()).toLowerCase().startsWith('zh') ? 1 : 0])}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Approval deadline (hours)', '审批时限（小时）')}</span><input name="slaHours" type="number" min="1" max="720" step="1" placeholder="${ccText('Blank disables reminders', '留空表示不设置时限')}"/></label></div><textarea name="steps" id="ccApprovalSteps" hidden></textarea><div id="ccApprovalStepCards" class="cc-approval-step-cards"></div><input type="hidden" id="ccApproverToken"/><div class="cc-route-directory"><div class="cc-route-directory-head"><strong>${ccText('Organization approvers', '组织内审批人员')}</strong><span>${ccText('Select a person', '点击姓名进行选择')}</span></div>${approverPickerTree || `<div class="cc-muted">${ccText('No eligible people are linked to the organization yet.', '暂时没有关联到组织架构的可选审批人员。')}</div>`}<details class="cc-route-other"><summary>${ccText('Positions and system roles', '按职位或系统角色')}</summary><div class="cc-route-other-options">${positions.map(position => `<button type="button" class="btn btn-sm" data-route-token="position:${escapeHtml(position.id)}">${escapeHtml([departments.find(d => d.id === position.departmentId)?.name, position.name].filter(Boolean).join(' · '))}</button>`).join('')}${['admin','owner','philippines_manager'].map(role => `<button type="button" class="btn btn-sm" data-route-token="${escapeHtml(role)}">${escapeHtml(roleLabel(role))}</button>`).join('')}</div></details><div class="cc-inline-form cc-route-picker"><button type="button" class="btn btn-sm" id="ccApproverAdd">${ccText('Add as new step', '新增为审批步骤')}</button><button type="button" class="btn btn-sm" id="ccApproverAddToLast">${ccText('Add to last step', '加入最后一步')}</button></div></div><p class="cc-meta">${ccText('Each step can be approved by any one person, or set to require everyone. Route changes apply to new requests only.', '每一步默认任一人通过，也可改为全部会签。路径修改只影响之后新建的申请。')}</p><div id="ccApprovalPreview" class="cc-meta" aria-live="polite"></div><button class="btn btn-primary">${ccText('Save route', '保存审批路径')}</button></form></section>` : ''}
     ${mayViewTasks ? `<section class="cc-section" data-cc-area="collaboration"><h3>${ccText('Tasks', '集团与门店协作任务')}</h3><form id="ccTaskFilterForm" class="cc-task-filters"><input type="search" name="q" value="${escapeHtml(state.taskFilters?.q || '')}" placeholder="${ccText('Search title, details or assignee', '搜索任务名称、说明或负责人')}"/><select name="status"><option value="" ${!state.taskFilters?.status ? 'selected' : ''}>${ccText('All statuses', '全部状态')}</option><option value="open" ${state.taskFilters?.status === 'open' ? 'selected' : ''}>${ccText('Open', '待处理')}</option><option value="in_progress" ${state.taskFilters?.status === 'in_progress' ? 'selected' : ''}>${ccText('In progress', '进行中')}</option><option value="completed" ${state.taskFilters?.status === 'completed' ? 'selected' : ''}>${ccText('Completed', '已完成')}</option><option value="cancelled" ${state.taskFilters?.status === 'cancelled' ? 'selected' : ''}>${ccText('Cancelled', '已取消')}</option></select><select name="priority"><option value="" ${!state.taskFilters?.priority ? 'selected' : ''}>${ccText('All priorities', '全部优先级')}</option><option value="urgent" ${state.taskFilters?.priority === 'urgent' ? 'selected' : ''}>${ccText('Urgent', '紧急')}</option><option value="high" ${state.taskFilters?.priority === 'high' ? 'selected' : ''}>${ccText('High', '高')}</option><option value="normal" ${state.taskFilters?.priority === 'normal' ? 'selected' : ''}>${ccText('Normal', '普通')}</option><option value="low" ${state.taskFilters?.priority === 'low' ? 'selected' : ''}>${ccText('Low', '低')}</option></select><select name="storeId"><option value="" ${!state.taskFilters?.storeId ? 'selected' : ''}>${ccText('All stores', '全部门店')}</option><option value="none" ${state.taskFilters?.storeId === 'none' ? 'selected' : ''}>${ccText('Group-level task', '集团任务')}</option>${stores.map(s => `<option value="${escapeHtml(s.id)}" ${state.taskFilters?.storeId === s.id ? 'selected' : ''}>${escapeHtml(tStore(s.name))}</option>`).join('')}</select><button class="btn btn-sm" type="submit">${ccText('Search', '筛选')}</button><button class="btn btn-sm" type="button" data-task-reset>${ccText('Reset', '重置')}</button><span class="cc-meta">${ccPageSummary(taskData)}</span></form><div class="cc-list">${taskCards || ccEmptyState(ccText('No tasks', '暂无任务'), ccText('Assigned work will appear here.', '派发的任务会显示在这里。'), can('task.create') ? ccText('Create task', '创建任务') : '', 'task')}</div><div class="cc-actions cc-workflow-pager">${ccPagerButtons('task', taskData)}</div></section>` : ''}
     ${can('task.create') ? `<section class="card cc-section" data-cc-area="storeops"><h3>${ccText('Daily store report', '门店每日汇报')}</h3><form id="ccStoreReportForm" class="cc-form-grid">${!state.me.storeId ? `<label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId" required><option value="">—</option>${stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label>` : ''}<label class="cc-field"><span>${ccText('Report date', '汇报日期')}</span><input name="reportDate" type="date" required value="${new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10)}"/></label><label class="cc-field cc-wide"><span>${ccText('Daily summary', '工作内容')}</span><textarea name="summary" rows="2"></textarea></label><label class="cc-field"><span>${ccText('Additional context (no sales or inventory figures)', '其他工作说明（不填销售额或库存数据）')}</span><textarea name="additionalNote" rows="2"></textarea></label><label class="cc-field"><span>${ccText('Incidents', '异常事项')}</span><textarea name="incidents" rows="2"></textarea></label><label class="cc-field cc-wide"><span>${ccText('Evidence (PDF/PNG/JPG, up to 4 MB each)', '凭证（PDF/PNG/JPG，每个不超过 4MB）')}</span><input name="attachments" type="file" multiple accept="application/pdf,image/png,image/jpeg"/></label><div><button class="btn btn-primary">${ccText('Submit report', '提交汇报')}</button></div></form><div class="cc-list">${storeReports.map(renderStoreReportCard).join('') || `<div class="cc-muted">${ccText('No reports yet', '暂无汇报')}</div>`}</div>${storeOperationPager('reports')}</section>` : ''}
     ${can('task.create') ? `<section class="card cc-section" data-cc-area="storeops"><h3>${ccText('Store inspection', '门店巡检')}</h3><form id="ccInspectionForm" class="cc-form-grid">${!state.me.storeId ? `<label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId" required><option value="">—</option>${stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label>` : ''}<label class="cc-field"><span>${ccText('Inspection date', '巡检日期')}</span><input name="inspectionDate" type="date" required value="${new Date(Date.now() - new Date().getTimezoneOffset()*60000).toISOString().slice(0,10)}"/></label><label class="cc-field"><span>${ccText('Result', '结果')}</span><select name="result"><option value="pass">${ccText('Pass', '通过')}</option><option value="attention">${ccText('Needs attention', '需关注')}</option><option value="fail">${ccText('Fail', '不合格')}</option></select></label><label class="cc-field"><span>${ccText('Score (0–100)', '评分（0–100）')}</span><input name="score" type="number" min="0" max="100" step="1"/></label><label class="cc-field"><span>${ccText('Checklist', '检查清单')}</span><textarea name="checklist" rows="3" placeholder="${ccText('One check per line', '每行一项检查内容')}"></textarea></label><label class="cc-field"><span>${ccText('Findings', '发现问题')}</span><textarea name="findings" rows="3"></textarea></label><label class="cc-field cc-wide"><span>${ccText('Evidence (PDF/PNG/JPG, up to 4 MB each)', '凭证（PDF/PNG/JPG，每个不超过 4MB）')}</span><input name="attachments" type="file" multiple accept="application/pdf,image/png,image/jpeg"/></label><div><button class="btn btn-primary">${ccText('Save inspection', '保存巡检')}</button></div></form><div class="cc-list">${storeInspections.map(renderStoreInspectionCard).join('') || `<div class="cc-muted">${ccText('No inspections yet', '暂无巡检记录')}</div>`}</div>${storeOperationPager('inspections')}</section>` : ''}
@@ -1187,6 +1267,20 @@ async function renderControlCenter(root) {
     ${can('system.audit.view') ? `<section class="cc-section" data-cc-area="governance"><h3>${ccText('Audit events', '操作审计')}</h3><form id="ccAuditFilterForm" class="cc-workflow-filters"><input type="search" name="q" value="${escapeHtml(state.ccAuditFilters?.q || '')}" placeholder="${ccText('Search action, user or record', '搜索操作、人员或记录')}"/><label class="cc-field"><span>${ccText('From', '开始日期')}</span><input type="date" name="from" value="${escapeHtml(state.ccAuditFilters?.from || '')}"/></label><label class="cc-field"><span>${ccText('To', '结束日期')}</span><input type="date" name="to" value="${escapeHtml(state.ccAuditFilters?.to || '')}"/></label><button class="btn btn-sm" type="submit">${ccText('Search', '筛选')}</button><button class="btn btn-sm" type="button" data-audit-reset>${ccText('Reset', '重置')}</button><span class="cc-meta">${ccPageSummary(auditData)}</span></form><div class="cc-list">${auditEvents.length ? auditEvents.map(a => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(a.action)}</strong><span class="cc-meta">${escapeHtml(new Date(a.createdAt).toLocaleString())}</span></div><div class="cc-meta">${escapeHtml(a.actorName)} · ${escapeHtml(a.resourceType)} · ${escapeHtml(a.resourceId || '')}</div></article>`).join('') : `${ccEmptyState(ccText('No V2 audit events', '暂无 V2 操作记录'), ccText('Audit entries will appear here after actions are performed.', '操作发生后，审计记录会显示在这里。'))}`}</div><div class="cc-actions cc-workflow-pager"><button type="button" class="btn btn-sm" data-audit-page="prev" ${auditData.offset <= 0 ? 'disabled' : ''}>${ccText('Previous', '上一页')}</button><button type="button" class="btn btn-sm" data-audit-page="next" ${auditData.offset + auditData.limit >= auditData.total ? 'disabled' : ''}>${ccText('Next', '下一页')}</button></div></section>` : ''}
     <section class="cc-section" data-cc-area="collaboration"><h3>${ccText('Notifications', '通知')} · ${ccText('Unread', '未读')} ${Number(noticeData.unread || 0)}</h3><div class="cc-list">${notices.length ? notices.map(n => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(n.title)}</strong>${!n.readAt ? `<button class="btn btn-sm" data-notice-read="${escapeHtml(n.id)}">${ccText('Mark read', '标为已读')}</button>` : ''}</div><div>${escapeHtml(n.body)}</div><div class="cc-meta">${escapeHtml(new Date(n.createdAt).toLocaleString())}</div></article>`).join('') : `${ccEmptyState(ccText('No notifications', '暂无通知'), ccText('New notifications will appear here.', '有新通知时会显示在这里。'))}`}</div><div class="cc-actions cc-workflow-pager"><span class="cc-meta">${ccPageSummary(noticeData)}</span><button type="button" class="btn btn-sm" data-notice-page="prev" ${noticeData.offset <= 0 ? 'disabled' : ''}>${ccText('Previous', '上一页')}</button><button type="button" class="btn btn-sm" data-notice-page="next" ${noticeData.offset + noticeData.limit >= noticeData.total ? 'disabled' : ''}>${ccText('Next', '下一页')}</button></div></section>`;
 
+  const organizationSection = root.querySelector('[data-cc-area="org"]');
+  organizationSection?.querySelector('p.cc-meta')?.insertAdjacentHTML('afterend', organizationTree);
+  if (organizationSection) {
+    const editableDirectory = organizationSection.querySelector('.cc-org-grid');
+    const editableForms = Array.from(organizationSection.querySelectorAll('.cc-inline-form'));
+    if (editableDirectory) {
+      const managementDetails = document.createElement('details');
+      managementDetails.className = 'cc-org-management';
+      const managementSummary = document.createElement('summary');
+      managementSummary.textContent = ccText('Edit organization records', '管理组织资料');
+      managementDetails.append(managementSummary, editableDirectory, ...editableForms);
+      organizationSection.append(managementDetails);
+    }
+  }
   // 角色级关闭：店长的「门店跟进 / 组织与流程设置」工作区整体移出，
   // 其 section 不计入 availableAreas → 页内标签页与跳转按钮一并失效（下方统一按此集合判定）。
   const availableAreas = new Set(Array.from(root.querySelectorAll('[data-cc-area]'), section => section.dataset.ccArea).filter(area => canAccessWorkspace(area)));
@@ -1238,7 +1332,7 @@ async function renderControlCenter(root) {
     root.querySelector('.cc-dashboard-grid').hidden = active !== 'overview';
     root.querySelector('.cc-overview-grid').hidden = active !== 'overview';
     root.querySelector('.cc-announcement-ticker').hidden = active !== 'overview';
-    root.querySelector('.cc-page-header').hidden = active !== 'overview';
+    root.querySelector('.cc-home-hero').hidden = active !== 'overview';
     root.querySelector('.cc-detail-heading').hidden = active === 'overview';
     const titles = { org: ccText('Organization','组织架构'), approvals: ccText('Approval Center','审批中心'), collaboration: ccText('Tasks & notifications','任务协作'), storeops: ccText('Store follow-up','门店跟进'), purchasing: ccText('Shipment dashboard','跟单仪表盘'), governance: ccText('Governance','治理设置'), announcements: ccText('Announcements','内容公告') };
     root.querySelector('#ccDetailTitle').textContent = titles[active] || '';
@@ -1544,6 +1638,14 @@ async function renderControlCenter(root) {
     await renderControlCenter(root);
   }));
   $('#ccOrgForm')?.addEventListener('submit', async e => { e.preventDefault(); const fd = new FormData(e.currentTarget); try { await POST('/api/v2/organizations', Object.fromEntries(fd.entries())); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } });
+  $$('[data-directory-form]', root).forEach(form => form.addEventListener('submit', async e => { e.preventDefault(); try { await POST(`/api/v2/${form.dataset.directoryForm}`, Object.fromEntries(new FormData(form).entries())); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } }));
+  $$('[data-directory-edit]', root).forEach(button => button.addEventListener('click', () => {
+    const [collection, id] = String(button.dataset.directoryEdit).split(':');
+    const item = ({ organizations: orgs, departments, positions })[collection]?.find(x => x.id === id); if (!item) return;
+    const title = collection === 'organizations' ? ccText('Edit organization', '编辑组织') : collection === 'departments' ? ccText('Edit department', '编辑部门') : ccText('Edit position', '编辑职位');
+    const modal = openModal({ title, body: `<form id="ccDirectoryEdit" class="cc-form-grid"><label class="cc-field"><span>${ccText('Code', '编码')}</span><input name="code" required maxlength="40" value="${escapeHtml(item.code)}"/></label><label class="cc-field"><span>${ccText('Name', '名称')}</span><input name="name" required maxlength="120" value="${escapeHtml(item.name)}"/></label><label class="cc-field"><span>${ccText('Status', '状态')}</span><select name="active"><option value="true" ${item.active === false ? '' : 'selected'}>${ccText('Active', '启用')}</option><option value="false" ${item.active === false ? 'selected' : ''}>${ccText('Inactive', '停用')}</option></select></label></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccDirectorySave">${ccText('Save', '保存')}</button>` });
+    $('#ccDirectorySave', modal).addEventListener('click', async () => { const payload = Object.fromEntries(new FormData($('#ccDirectoryEdit', modal)).entries()); payload.active = payload.active === 'true'; try { await PUT(`/api/v2/${collection}/${encodeURIComponent(id)}`, payload); closeModal(); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } });
+  }));
   $('#ccEmployeeForm')?.addEventListener('submit', async e => { e.preventDefault(); const fd = new FormData(e.currentTarget); try { await POST('/api/v2/employees', Object.fromEntries(fd.entries())); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } });
   $$('[data-v2-edit-employee]', root).forEach(button => button.addEventListener('click', () => {
     const item = employees.find(x => x.id === button.dataset.v2EditEmployee); if (!item) return;
@@ -1569,32 +1671,55 @@ async function renderControlCenter(root) {
   }));
   const definitionForm = $('#ccDefinitionForm');
   if (definitionForm) {
+    let routeSteps = [];
+    const setSelectedApprover = token => {
+      const input = $('#ccApproverToken'); if (!input) return;
+      input.value = token || '';
+      $$('[data-route-token]', definitionForm).forEach(button => {
+        const selected = button.dataset.routeToken === input.value;
+        button.classList.toggle('selected', selected);
+        button.setAttribute('aria-pressed', String(selected));
+      });
+    };
+    $$('[data-route-token]', definitionForm).forEach(button => button.addEventListener('click', () => setSelectedApprover(button.dataset.routeToken)));
+    const routeLabel = approver => {
+      if (approver.kind === 'user') return approverPeople.find(person => person.id === approver.id)?.label || ccText('Unavailable account', '账号不可用');
+      if (approver.kind === 'position') return positions.find(position => position.id === approver.id)?.name || ccText('Unavailable position', '职位不可用');
+      return roleLabel(approver.id);
+    };
+    const syncRoute = () => { definitionForm.elements.steps.value = routeSteps.map(step => `${step.mode === 'all' ? 'all:' : ''}${step.approvers.map(approver => `${approver.kind === 'user' ? 'user:' : approver.kind === 'position' ? 'position:' : ''}${approver.id}`).join(',')}`).join('\n'); };
     const fillDefinition = () => {
       const d = definitions.find(x => x.type === definitionForm.elements.type.value);
-      const steps = d?.config?.steps || [{ mode: 'any', approvers: [{ kind: 'role', id: 'admin' }, { kind: 'role', id: 'owner' }, { kind: 'role', id: 'philippines_manager' }] }];
-      definitionForm.elements.steps.value = steps.map(s => `${s.mode === 'all' ? 'all:' : ''}${(s.approvers || []).map(a => `${a.kind === 'user' ? 'user:' : ''}${a.id}`).join(',')}`).join('\n');
+      routeSteps = JSON.parse(JSON.stringify(d?.config?.steps || [{ mode: 'any', approvers: [{ kind: 'role', id: 'admin' }] }]));
+      const firstApprover = routeSteps[0]?.approvers?.[0];
+      const preferredToken = firstApprover ? `${['user','position'].includes(firstApprover.kind) ? `${firstApprover.kind}:` : ''}${firstApprover.id}` : '';
+      const hasPreferredToken = preferredToken && $$('[data-route-token]', definitionForm).some(button => button.dataset.routeToken === preferredToken);
+      setSelectedApprover(hasPreferredToken ? preferredToken : (approverPeople[0] ? `user:${approverPeople[0].id}` : positions[0] ? `position:${positions[0].id}` : 'admin'));
+      syncRoute();
       definitionForm.elements.slaHours.value = d?.config?.slaHours ?? '';
       renderRoutePreview();
     };
     const renderRoutePreview = () => {
-      const preview = $('#ccApprovalPreview'), textarea = $('#ccApprovalSteps'); if (!preview || !textarea) return;
+      const preview = $('#ccApprovalPreview'), cards = $('#ccApprovalStepCards'); if (!preview || !cards) return;
       const d = definitions.find(x => x.type === definitionForm.elements.type.value);
-      const lines = textarea.value.split('\n').map(x => x.trim()).filter(Boolean);
-      preview.innerHTML = `${d ? `${ccText('Current route version', '当前流程版本')} v${Number(d.version || 1)} · ` : ''}${lines.length ? lines.map((line, index) => { const all = line.startsWith('all:'), tokens = (all ? line.slice(4) : line).split(',').map(x => x.trim()).filter(Boolean); return `<div>${ccText('Step', '第')} ${index + 1} · ${all ? ccText('Everyone must approve', '全部会签') : ccText('Any one may approve', '任一人通过')} · ${escapeHtml(tokens.join('、') || ccText('No approver', '未设置审批人'))}</div>`; }).join('') : ccText('Add at least one approval step.', '请至少添加一个审批步骤。')}`;
+      cards.innerHTML = routeSteps.map((step, index) => `<article class="cc-approval-step-card"><div><strong>${ccText('Step', '第')} ${index + 1}</strong><select data-route-mode="${index}"><option value="any" ${step.mode !== 'all' ? 'selected' : ''}>${ccText('Any one approves', '任一人通过')}</option><option value="all" ${step.mode === 'all' ? 'selected' : ''}>${ccText('Everyone approves', '全部会签')}</option></select></div><div class="cc-route-chips">${step.approvers.map((approver, approverIndex) => `<span>${escapeHtml(routeLabel(approver))}<button type="button" data-route-remove="${index}:${approverIndex}" aria-label="${ccText('Remove', '移除')}">×</button></span>`).join('')}</div><button type="button" class="btn btn-sm" data-route-step-remove="${index}">${ccText('Remove step', '删除步骤')}</button></article>`).join('') || `<div class="cc-muted">${ccText('Select a person below to add the first approval step.', '请从下方选择人员，新增第一个审批步骤。')}</div>`;
+      preview.textContent = d ? `${ccText('Current route version', '当前流程版本')} v${Number(d.version || 1)} · ${ccText('Changes apply to new requests only.', '修改只影响新申请。')}` : '';
+      $$('[data-route-mode]', cards).forEach(select => select.addEventListener('change', () => { routeSteps[Number(select.dataset.routeMode)].mode = select.value; syncRoute(); renderRoutePreview(); }));
+      $$('[data-route-remove]', cards).forEach(button => button.addEventListener('click', () => { const [stepIndex, approverIndex] = button.dataset.routeRemove.split(':').map(Number); routeSteps[stepIndex].approvers.splice(approverIndex, 1); if (!routeSteps[stepIndex].approvers.length) routeSteps.splice(stepIndex, 1); syncRoute(); renderRoutePreview(); }));
+      $$('[data-route-step-remove]', cards).forEach(button => button.addEventListener('click', () => { routeSteps.splice(Number(button.dataset.routeStepRemove), 1); syncRoute(); renderRoutePreview(); }));
     };
     definitionForm.elements.type.addEventListener('change', fillDefinition); fillDefinition();
-    $('#ccApprovalSteps')?.addEventListener('input', renderRoutePreview);
     $('#ccApproverAdd')?.addEventListener('click', () => {
-      const textarea = $('#ccApprovalSteps'), token = $('#ccApproverToken')?.value; if (!textarea || !token) return;
-      textarea.value = `${textarea.value.trim()}${textarea.value.trim() ? '\n' : ''}${token}`;
-      textarea.dispatchEvent(new Event('input', { bubbles: true })); textarea.focus();
+      const token = $('#ccApproverToken')?.value; if (!token) return;
+      routeSteps.push({ mode: 'any', approvers: [{ kind: token.startsWith('user:') ? 'user' : token.startsWith('position:') ? 'position' : 'role', id: token.replace(/^(user|position):/, '') }] }); syncRoute(); renderRoutePreview();
     });
+    $('#ccApproverAddToLast')?.addEventListener('click', () => { const token = $('#ccApproverToken')?.value; if (!token || !routeSteps.length) return; const approver = { kind: token.startsWith('user:') ? 'user' : token.startsWith('position:') ? 'position' : 'role', id: token.replace(/^(user|position):/, '') }; if (!routeSteps[routeSteps.length - 1].approvers.some(item => item.kind === approver.kind && item.id === approver.id)) routeSteps[routeSteps.length - 1].approvers.push(approver); syncRoute(); renderRoutePreview(); });
     definitionForm.addEventListener('submit', async e => {
       e.preventDefault();
       try {
         const steps = definitionForm.elements.steps.value.split('\n').map(line => line.trim()).filter(Boolean).map((line, index) => {
           const mode = line.startsWith('all:') ? 'all' : 'any', spec = mode === 'all' ? line.slice(4) : line;
-          const approvers = spec.split(',').map(raw => raw.trim()).filter(Boolean).map(token => token.startsWith('user:') ? { kind: 'user', id: token.slice(5) } : { kind: 'role', id: token });
+          const approvers = spec.split(',').map(raw => raw.trim()).filter(Boolean).map(token => token.startsWith('user:') ? { kind: 'user', id: token.slice(5) } : token.startsWith('position:') ? { kind: 'position', id: token.slice(9) } : { kind: 'role', id: token });
           return { label: `Step ${index + 1}`, mode, approvers };
         });
         if (!steps.length) throw new Error(ccText('Add at least one approval step', '至少添加一个审批步骤'));
@@ -4104,10 +4229,66 @@ async function renderAudit(root) {
 //   前端这里只是「不渲染必然失败的入口」（自身那行不渲染停用/删除按钮），
 //   绝不以隐藏按钮作为安全手段。
 
+function selfAccountSettingsHtml() {
+  const me = state.me || {};
+  const isStoreAccount = !!me.storeId;
+  const store = state.stores.find(s => s.id === me.storeId);
+  return `
+    <section class="cc-section" aria-label="${escapeHtml(t('account.title'))}">
+      <div class="card-header">
+        <div>
+          <div class="card-title">${t('account.profile')}</div>
+          <div class="card-subtitle">${isStoreAccount ? t('account.profileSubMgr') : t('account.profileSubAdmin')}</div>
+        </div>
+      </div>
+      <div class="row-2-eq">
+        <div class="card">
+          <div class="section">
+            <div class="kv-row"><span class="k">${t('account.username')}</span><span class="v mono">${escapeHtml(me.username || '—')}</span></div>
+            <div class="kv-row"><span class="k">${t('account.name')}</span><span class="v">${escapeHtml(tName(me.name || '—'))}</span></div>
+            <div class="kv-row"><span class="k">${t('account.role')}</span><span class="v"><span class="pill ${isStoreAccount ? 'pill-retail' : 'pill-b2b'}">${escapeHtml(roleLabel(me.role))}</span></span></div>
+            ${me.storeId ? `<div class="kv-row"><span class="k">${t('account.store')}</span><span class="v">${escapeHtml(store ? tStore(store.name) : '—')}</span></div>` : ''}
+            <div class="kv-row"><span class="k">${t('account.createdAt')}</span><span class="v mono" style="font-size:11px;">${me.createdAt ? new Date(me.createdAt).toLocaleString(locale()) : '—'}</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-title" style="margin-bottom:16px;">${t('account.pwdCard')}</div>
+          <form data-form id="pwdForm">
+            <div class="modal-form-row"><label><span>${t('account.currentPwd')}</span><input type="password" name="currentPassword" required autocomplete="current-password"/></label></div>
+            <div class="modal-form-row"><label><span>${t('account.newPwd')}</span><input type="password" name="newPassword" required minlength="6" autocomplete="new-password"/></label></div>
+            <div class="modal-form-row"><label><span>${t('account.confirmPwd')}</span><input type="password" name="confirmPassword" required minlength="6" autocomplete="new-password"/></label></div>
+            <div class="modal-form-error" id="pwdError"></div>
+            <button class="btn btn-primary" type="submit" style="margin-top:8px;">${t('account.changePwd')}</button>
+          </form>
+        </div>
+      </div>
+    </section>`;
+}
+
+function bindSelfAccountSettings(root) {
+  $('#pwdForm', root)?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const data = Object.fromEntries(fd);
+    const error = $('#pwdError', root);
+    if (data.newPassword !== data.confirmPassword) { error.textContent = t('account.pwdMismatch'); return; }
+    try {
+      await POST('/api/auth/change-password', { currentPassword: data.currentPassword, newPassword: data.newPassword });
+      toast(t('account.pwdDone'), 'success');
+      e.target.reset(); error.textContent = '';
+    } catch (err) { error.textContent = tMsg(err.message); }
+  });
+}
+
 async function renderAccounts(root) {
-  // 防御：没有 system.user.view 时不要请求接口（403 会抛错），直接给一段说明
-  if (!can('system.user.view')) {
-    root.innerHTML = `<div class="card card-empty">${escapeHtml(t('common.noPermission'))}</div>`;
+  const canManageAccounts = can('system.user.view');
+  const personalSettings = selfAccountSettingsHtml();
+  // 所有人都能在这里维护自己的资料与密码；全员列表只对账号管理权限开放。
+  if (!canManageAccounts) {
+    root.innerHTML = `
+      <div class="page-header"><div class="page-header-text"><div class="page-title">${t('accounts.title')}</div><div class="page-subtitle">${t('account.subtitle')}</div></div></div>
+      ${personalSettings}`;
+    bindSelfAccountSettings(root);
     return;
   }
   // 门店名解析要用最新门店表（有 store.view 才刷；没有就沿用已有数据，只影响展示）
@@ -4210,6 +4391,7 @@ async function renderAccounts(root) {
       </div>
       <div class="page-spacer"></div>
     </div>
+    ${personalSettings}
     <div class="cc-workspace-stats">${uiStat(ccText('Total accounts', '账号总数'), items.length, 'brand')}${uiStat(ccText('Enabled', '启用中'), enabledCount, 'success')}${uiStat(ccText('Disabled', '已停用'), items.length - enabledCount, 'neutral')}${uiStat(ccText('Store linked', '关联门店'), storeAccountCount, 'warning')}</div>
     ${canEdit ? `<section class="card cc-section"><h3>${ccText('Create login account', '创建登录账号')}</h3><p>${ccText('Set a unique username and a temporary password of at least 6 characters. Store and regional roles must be bound to their scope.', '用户名须唯一，初始密码至少 6 位。门店和区域岗位必须绑定对应范围。')}</p><form id="ccAccountForm" class="cc-form-grid"><label class="cc-field"><span>${ccText('Username', '用户名')}</span><input name="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9_]+"/></label><label class="cc-field"><span>${ccText('Full name', '姓名')}</span><input name="name" required maxlength="120"/></label><label class="cc-field"><span>${ccText('Initial password (6+ characters)', '初始密码（至少 6 位）')}</span><input name="password" type="password" required minlength="6" autocomplete="new-password"/></label><label class="cc-field"><span>${ccText('Role', '角色')}</span><select name="role"><option value="owner">${escapeHtml(roleLabel('owner'))}</option><option value="hq_operator">${escapeHtml(roleLabel('hq_operator'))}</option><option value="philippines_manager">${escapeHtml(roleLabel('philippines_manager'))}</option><option value="regional_manager">${escapeHtml(roleLabel('regional_manager'))}</option><option value="purchaser">${escapeHtml(roleLabel('purchaser'))}</option><option value="manager">${escapeHtml(roleLabel('store_manager'))}</option><option value="sales">${escapeHtml(roleLabel('sales'))}</option><option value="warehouse">${escapeHtml(roleLabel('warehouse'))}</option><option value="service">${escapeHtml(roleLabel('service'))}</option><option value="admin">${escapeHtml(roleLabel('admin'))}</option></select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">${ccText('No store', '不绑定门店')}</option>${state.stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Region', '区域')}</span><select name="regionId"><option value="">${ccText('No region', '不绑定区域')}</option>${accountRegions.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Employee profile', '关联员工档案')}</span><select name="employeeId"><option value="">${ccText('No employee link', '不关联员工')}</option>${accountEmployees.filter(x => !x.userId).map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Phone', '电话')}</span><input name="phone" maxlength="80"/></label><div class="cc-wide"><button class="btn btn-primary" type="submit">${ccText('Create account', '创建账号')}</button></div></form></section>` : ''}
     <div class="card" style="padding:11px 16px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--muted);">
@@ -4221,6 +4403,8 @@ async function renderAccounts(root) {
       ? `<div class="card" style="text-align:center;color:var(--muted);padding:44px;">${escapeHtml(t('accounts.empty'))}</div>`
       : `<div class="tx-list" style="max-height:none;">${headHtml}${items.map(rowHtml).join('')}</div>`}
   `;
+
+  bindSelfAccountSettings(root);
 
   $('#ccAccountForm')?.addEventListener('submit', async e => {
     e.preventDefault(); const fd = new FormData(e.currentTarget);
@@ -4366,59 +4550,6 @@ function showNewPasswordDialog(account, password) {
       copyBtn.textContent = t('accounts.resetPwCopied');
       setTimeout(() => { copyBtn.textContent = t('accounts.resetPwCopy'); }, 1600);
     } catch (e) { toast(t('accounts.resetPwCopy') + ' ✗', 'error'); }
-  });
-}
-
-function renderAccount(root) {
-  // 本页只有展示，没有写操作 —— 因此不涉及任何权限判断，只做「总部账号 / 门店账号」的文案区分。
-  const isStoreAccount = !!state.me.storeId;
-  root.innerHTML = `
-    <div class="page-header">
-      <div class="page-header-text">
-        <div class="page-title">${t('account.title')}</div>
-        <div class="page-subtitle">${t('account.subtitle')}</div>
-      </div>
-    </div>
-    <div class="row-2-eq">
-      <div class="card">
-        <div class="card-title">${t('account.profile')}</div>
-        <div class="card-subtitle" style="margin-bottom:16px;">${isStoreAccount ? t('account.profileSubMgr') : t('account.profileSubAdmin')}</div>
-        <div class="section">
-          <div class="kv-row"><span class="k">${t('account.username')}</span><span class="v mono">${escapeHtml(state.me.username)}</span></div>
-          <div class="kv-row"><span class="k">${t('account.name')}</span><span class="v">${escapeHtml(tName(state.me.name))}</span></div>
-          <div class="kv-row"><span class="k">${t('account.role')}</span><span class="v"><span class="pill ${isStoreAccount ? 'pill-retail' : 'pill-b2b'}">${escapeHtml(roleLabel(state.me.role))}</span></span></div>
-          ${state.me.storeId ? `<div class="kv-row"><span class="k">${t('account.store')}</span><span class="v">${escapeHtml(state.stores.find(s => s.id === state.me.storeId)?.name || '—')}</span></div>` : ''}
-          <div class="kv-row"><span class="k">${t('account.createdAt')}</span><span class="v mono" style="font-size:11px;">${new Date(state.me.createdAt).toLocaleString(locale())}</span></div>
-        </div>
-      </div>
-      <div class="card">
-        <div class="card-title" style="margin-bottom:16px;">${t('account.pwdCard')}</div>
-        <form data-form id="pwdForm">
-          <div class="modal-form-row">
-            <label><span>${t('account.currentPwd')}</span><input type="password" name="currentPassword" required/></label>
-          </div>
-          <div class="modal-form-row">
-            <label><span>${t('account.newPwd')}</span><input type="password" name="newPassword" required minlength="6"/></label>
-          </div>
-          <div class="modal-form-row">
-            <label><span>${t('account.confirmPwd')}</span><input type="password" name="confirmPassword" required minlength="6"/></label>
-          </div>
-          <div class="modal-form-error" id="pwdError"></div>
-          <button class="btn btn-primary" type="submit" style="margin-top:8px;">${t('account.changePwd')}</button>
-        </form>
-      </div>
-    </div>
-  `;
-  $('#pwdForm').addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const fd = new FormData(e.target);
-    const data = Object.fromEntries(fd);
-    if (data.newPassword !== data.confirmPassword) { $('#pwdError').textContent = t('account.pwdMismatch'); return; }
-    try {
-      await POST('/api/auth/change-password', { currentPassword: data.currentPassword, newPassword: data.newPassword });
-      toast(t('account.pwdDone'), 'success');
-      e.target.reset(); $('#pwdError').textContent = '';
-    } catch (err) { $('#pwdError').textContent = tMsg(err.message); }
   });
 }
 

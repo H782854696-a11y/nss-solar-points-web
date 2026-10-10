@@ -686,7 +686,7 @@ app.post('/api/users/:id/reset-password', (req, res) => {
   if (newPassword.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
 
   target.password = bcrypt.hashSync(newPassword, 12);
-  // 管理员重置产生的是临时口令；无论角色，都必须在首次登录后自行改密。
+  // 重置为临时密码后，所有角色都必须先自行改密；不能因角色而绕过此门禁。
   target.mustChangePassword = true;
   writeAll('users', users);   // 只改 password 一个字段 → dataVersion 正常 +1
   // 作废该账号的全部旧会话
@@ -1243,10 +1243,14 @@ app.get('/api/v2/daily-deposits/:storeId/receipt', (req, res) => {
   res.set({ 'Content-Type': receipt.mimeType, 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
   res.sendFile(filePath);
 });
+function userHoldsPosition(user, positionId) {
+  const employee = user && (readAll('employees') || []).find(x => x.id === user.employeeId && x.active !== false);
+  return !!employee && employee.positionId === positionId;
+}
 function approvalSlotsForUser(instance, user) {
   const step = (instance.approvalSteps || [])[instance.currentStep];
   if (!step || !user) return [];
-  return (step.approvers || []).filter(a => a.kind === 'user' ? a.id === user.id : rbac.normalizeRole(a.id) === rbac.normalizeRole(user.role)).map(a => `${a.kind}:${a.id}`);
+  return (step.approvers || []).filter(a => a.kind === 'user' ? a.id === user.id : a.kind === 'position' ? userHoldsPosition(user, a.id) : rbac.normalizeRole(a.id) === rbac.normalizeRole(user.role)).map(a => `${a.kind}:${a.id}`);
 }
 function approvalSlotForActor(instance, user) {
   if (!user) return null;
@@ -1273,6 +1277,10 @@ function notifyCurrentApprovers(instance) {
     if (approver.kind === 'user') {
       const user = users.find(x => x.id === approver.id && !x.disabled);
       if (user && rbac.hasPermission(user, 'workflow.approve') && rbac.hasPermission(user, 'workflow.view') && rbac.can(user, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(user, 'workflow.view', { ...instance, country: 'PH' })) ids.add(user.id);
+    } else if (approver.kind === 'position') {
+      users.filter(x => !x.disabled && userHoldsPosition(x, approver.id))
+        .filter(x => rbac.hasPermission(x, 'workflow.approve') && rbac.hasPermission(x, 'workflow.view') && rbac.can(x, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(x, 'workflow.view', { ...instance, country: 'PH' }))
+        .forEach(x => ids.add(x.id));
     } else {
       users.filter(x => !x.disabled && (x.role === approver.id || rbac.normalizeRole(x.role) === rbac.normalizeRole(approver.id)))
         .filter(x => rbac.hasPermission(x, 'workflow.approve') && rbac.hasPermission(x, 'workflow.view') && rbac.can(x, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(x, 'workflow.view', { ...instance, country: 'PH' }))
@@ -1348,6 +1356,19 @@ app.post('/api/v2/organizations', (req, res) => {
   items.push(item); writeAll('organizations', items); recordControlAudit(req, u, 'organization.create', 'organization', item.id, { code, name });
   res.status(201).json({ item });
 });
+app.put('/api/v2/organizations/:id', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'org.manage')) return;
+  const items = readAll('organizations') || [], item = items.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '组织不存在' });
+  const b = req.body || {}, code = b.code === undefined ? item.code : controlCenter.cleanText(b.code, 40).toUpperCase();
+  const name = b.name === undefined ? item.name : controlCenter.cleanText(b.name, 120);
+  if (!code || !name) return res.status(400).json({ error: '组织名称和编码不能为空' });
+  if (items.some(x => x.id !== item.id && x.code.toLowerCase() === code.toLowerCase())) return res.status(409).json({ error: '组织编码已存在' });
+  if (b.active === false && ((readAll('departments') || []).some(x => x.organizationId === item.id && x.active !== false) || (readAll('regions') || []).some(x => x.organizationId === item.id && x.active !== false))) return res.status(409).json({ error: '该组织仍有关联的启用部门或区域，请先调整下级档案' });
+  Object.assign(item, { code, name, ...(b.type !== undefined ? { type: controlCenter.cleanText(b.type, 40) || 'unit' } : {}), ...(b.countryCode !== undefined ? { countryCode: controlCenter.cleanText(b.countryCode, 2).toUpperCase() } : {}), ...(b.timezone !== undefined ? { timezone: controlCenter.cleanText(b.timezone, 80) } : {}), ...(b.active !== undefined ? { active: !!b.active } : {}), updatedAt: nowIso() });
+  writeAll('organizations', items); recordControlAudit(req, u, 'organization.update', 'organization', item.id, { active: item.active }); res.json({ item });
+});
 app.get('/api/v2/regions', (req, res) => {
   if (!guard.checkPerm(req, res, 'org.view')) return;
   res.json({ items: (readAll('regions') || []).filter(x => x.active !== false && controlVisible(req, 'org.view', x)) });
@@ -1380,6 +1401,23 @@ for (const directory of [
     const now = nowIso(), item = { id: nanoid(), code, name, organizationId: b.organizationId || null, parentId: b.parentId || null, departmentId: b.departmentId || null, active: true, createdAt: now, updatedAt: now };
     items.push(item); writeAll(directory.collection, items); recordControlAudit(req, u, `${directory.path}.create`, directory.path, item.id, { code, name }); res.status(201).json({ item });
   });
+  app.put(`/api/v2/${directory.path}/:id`, (req, res) => {
+    const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+    if (!guard.checkPerm(req, res, 'org.manage')) return;
+    const items = readAll(directory.collection) || [], item = items.find(x => x.id === req.params.id);
+    if (!item) return res.status(404).json({ error: `${directory.name}不存在` });
+    const b = req.body || {}, code = b.code === undefined ? item.code : controlCenter.cleanText(b.code, 40).toUpperCase(), name = b.name === undefined ? item.name : controlCenter.cleanText(b.name, 120);
+    if (!code || !name) return res.status(400).json({ error: `${directory.name}名称和编码不能为空` });
+    if (items.some(x => x.id !== item.id && x.code.toLowerCase() === code.toLowerCase())) return res.status(409).json({ error: `${directory.name}编码已存在` });
+    if (b.active === false) {
+      const inUse = directory.collection === 'departments'
+        ? (readAll('positions') || []).some(x => x.departmentId === item.id && x.active !== false) || (readAll('employees') || []).some(x => x.departmentId === item.id && x.active !== false)
+        : (readAll('employees') || []).some(x => x.positionId === item.id && x.active !== false) || (readAll('workflowDefinitions') || []).some(x => (x.config?.steps || []).some(step => (step.approvers || []).some(a => a.kind === 'position' && a.id === item.id)));
+      if (inUse) return res.status(409).json({ error: `${directory.name}仍被启用的员工、下级档案或审批规则引用，不能停用` });
+    }
+    Object.assign(item, { code, name, ...(b.organizationId !== undefined ? { organizationId: b.organizationId || null } : {}), ...(b.parentId !== undefined ? { parentId: b.parentId || null } : {}), ...(b.departmentId !== undefined ? { departmentId: b.departmentId || null } : {}), ...(b.active !== undefined ? { active: !!b.active } : {}), updatedAt: nowIso() });
+    writeAll(directory.collection, items); recordControlAudit(req, u, `${directory.path}.update`, directory.path, item.id, { active: item.active }); res.json({ item });
+  });
 }
 
 app.all('/api/v2/warehouses', (req, res) => res.status(410).json({ error: '集团中控不再维护仓库档案' }));
@@ -1399,6 +1437,7 @@ app.post('/api/v2/employees', (req, res) => {
   if (!guard.check(req, res, 'staff.create', { storeId, country: 'PH' })) return;
   const items = readAll('employees') || [];
   if (items.some(x => x.employeeCode.toLowerCase() === employeeCode.toLowerCase())) return res.status(409).json({ error: '员工编号已存在' });
+  if (b.positionId && !(readAll('positions') || []).some(x => x.id === b.positionId && x.active !== false)) return res.status(400).json({ error: '所选职位不存在或已停用' });
   const linkedStore = storeId ? (readAll('stores') || []).find(x => x.id === storeId) : null;
   const now = nowIso(), item = { id: nanoid(), employeeCode, name, email: controlCenter.cleanText(b.email, 180), phone: controlCenter.cleanText(b.phone, 80), organizationId: b.organizationId || null, departmentId: b.departmentId || null, positionId: b.positionId || null, storeId, warehouseId: null, regionId: linkedStore?.regionId || null, userId: b.userId || null, active: true, createdAt: now, updatedAt: now };
   items.push(item); writeAll('employees', items); recordControlAudit(req, u, 'employee.create', 'employee', item.id, { employeeCode, name });
@@ -1415,6 +1454,7 @@ app.put('/api/v2/employees/:id', (req, res) => {
   const nextStore = nextStoreId ? (readAll('stores') || []).find(x => x.id === nextStoreId) : null;
   if (nextStoreId && !nextStore) return res.status(400).json({ error: '门店不存在' });
   const nextRegionId = nextStore?.regionId || null;
+  if (b.positionId && !(readAll('positions') || []).some(x => x.id === b.positionId && x.active !== false)) return res.status(400).json({ error: '所选职位不存在或已停用' });
   if (!guard.check(req, res, 'staff.edit', { ...item, storeId: nextStoreId, regionId: nextRegionId })) return;
   for (const k of ['name','email','phone','departmentId','positionId','userId']) if (b[k] !== undefined) item[k] = controlCenter.cleanText(b[k], k === 'name' ? 120 : 180) || null;
   if (b.userId) {
@@ -1473,12 +1513,15 @@ app.put('/api/v2/workflows/definitions/:type', (req, res) => {
   const activeUsers = readAll('users') || [];
   const normalized = [];
   for (const step of steps) {
-    const approvers = Array.isArray(step.approvers) ? step.approvers.map(a => ({ kind: a.kind === 'user' ? 'user' : 'role', id: controlCenter.cleanText(a.id, 100) })).filter(a => a.id) : [];
+    const approvers = Array.isArray(step.approvers) ? step.approvers.map(a => ({ kind: ['user','position'].includes(a.kind) ? a.kind : 'role', id: controlCenter.cleanText(a.id, 100) })).filter(a => a.id) : [];
     if (!approvers.length || approvers.length > 20) return res.status(400).json({ error: '每个审批步骤至少需要 1 名用户或角色，最多 20 名' });
     if (approvers.some(a => a.kind === 'role' && !validRoles.includes(a.id))) return res.status(400).json({ error: '审批角色不在系统角色清单内' });
     if (approvers.some(a => a.kind === 'role' && (!rbac.hasPermission({ role: a.id }, 'workflow.approve') || !rbac.hasPermission({ role: a.id }, 'workflow.view')))) return res.status(400).json({ error: `角色“${a.id}”缺少流程查看或审批权限` });
     if (approvers.some(a => a.kind === 'user' && !activeUsers.some(x => x.id === a.id && !x.disabled))) return res.status(400).json({ error: '审批用户不存在或已停用' });
     if (approvers.some(a => a.kind === 'user' && (!rbac.hasPermission(activeUsers.find(x => x.id === a.id), 'workflow.approve') || !rbac.hasPermission(activeUsers.find(x => x.id === a.id), 'workflow.view')))) return res.status(400).json({ error: '指定审批账号缺少流程查看或审批权限' });
+    const activePositions = readAll('positions') || [];
+    if (approvers.some(a => a.kind === 'position' && !activePositions.some(x => x.id === a.id && x.active !== false))) return res.status(400).json({ error: '审批职位不存在或已停用' });
+    if (approvers.some(a => a.kind === 'position' && !activeUsers.some(x => userHoldsPosition(x, a.id) && rbac.hasPermission(x, 'workflow.approve') && rbac.hasPermission(x, 'workflow.view')))) return res.status(400).json({ error: '审批职位目前没有具备审批权限的在职账号' });
     normalized.push({ label: controlCenter.cleanText(step.label || 'Approval', 100), mode: step.mode === 'all' ? 'all' : 'any', approvers });
   }
   const defs = readAll('workflowDefinitions') || [], existing = defs.find(x => x.type === type);
@@ -1516,9 +1559,7 @@ app.post('/api/v2/workflows', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'workflow.create')) return;
   const b = req.body || {}, type = String(b.type || '');
-  // 2026-10-07：门店整改已停用新建（前端三个入口一并移除）。
-  // 服务端同步拦截，防止绕过界面直接调 API 建单；存量申请不受影响，仍可审批/整改/关闭。
-  if (type === 'store_remediation') return res.status(400).json({ error: '门店整改流程已停用新建，如有需要请联系集团管理员' });
+  // 门店整改重新纳入本轮已确认范围；仍由下面的通用审批与执行闭环统一守卫。
   if (b.sourceFile && type !== 'stocktake') return res.status(400).json({ error: '只有盘点申请可以直接附加表格' });
   const sourceResult = b.sourceFile ? parseStocktakeSourceFile(b.sourceFile) : null;
   if (sourceResult?.error) return res.status(400).json({ error: sourceResult.error });
