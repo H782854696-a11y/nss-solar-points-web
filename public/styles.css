@@ -95,7 +95,7 @@ button, input, select, textarea { font-family: inherit; }
 
 /* =================== 登录页（2026-10-11 浅薄荷光伏版） =================== */
 #loginPage.login-page { --login-ink:#092f58; --login-accent:#049a47; --login-accent-strong:#008b40; --login-accent-soft:rgba(4,154,71,.18); position:fixed; inset:0; background:#edfff9; overflow:hidden auto; }
-#loginPage .login-bg { position:absolute; inset:0; z-index:0; background:url('/login-solar-landscape.png') center bottom / cover no-repeat; }
+#loginPage .login-bg { position:absolute; inset:0; z-index:0; background:image-set(url('/login-solar-landscape.webp?v=1') type('image/webp'),url('/login-solar-landscape.png') type('image/png')) center bottom / cover no-repeat; }
 #loginPage .login-shade { display:none; }
 #loginPage .login-layout { position:relative; z-index:2; min-height:100%; display:grid; grid-template-columns:minmax(0,1.58fr) minmax(390px,.93fr); align-items:center; gap:clamp(48px,7vw,136px); padding:clamp(42px,6vw,96px) clamp(54px,5.2vw,84px); }
 #loginPage .login-promo { align-self:stretch; display:flex; flex-direction:column; min-width:0; }

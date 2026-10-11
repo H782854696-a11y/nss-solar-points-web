@@ -439,7 +439,8 @@
 .app-shell .nav-group-system { border-top-color: var(--nav-line); }
 
 /* 侧栏 LOGO：白字版，去掉白块 */
-.app-shell .logo-row { background: transparent; }
+.app-shell .logo-row { background: var(--nav-bg); box-shadow: none; }
+.app-shell .logo-row .brand-logo { background: transparent; box-shadow: none; filter: none; mix-blend-mode: multiply; }
 
 /* ============================================================================
    2026-10-08 首页与全局「审批聚焦」配色统一 —— 绿主色 → 蓝主色

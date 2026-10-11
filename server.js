@@ -165,7 +165,37 @@ app.use((req, res, next) => {
   if (RETIRED_POINTS_PATH.test(req.path)) return res.status(410).json({ error: '旧版积分系统已下线' });
   next();
 });
-app.use(express.static(path.join(__dirname, 'public')));
+
+// Public assets are versioned from index.html. Keep HTML and the service worker
+// revalidating, but allow immutable caching for explicitly versioned files.
+// Compress only text assets; images already use their own encodings and API
+// responses are intentionally left untouched.
+const TEXT_STATIC = /\.(?:html?|js|css|svg|json)$/i;
+app.use((req, res, next) => {
+  if (!['GET', 'HEAD'].includes(req.method) || !TEXT_STATIC.test(req.path)) return next();
+  if (req.originalUrl.includes('?v=')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+  else if (req.path === '/' || req.path === '/index.html' || req.path === '/service-worker.js') res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
+  if (req.method !== 'GET' || req.headers.range) return next();
+  const accepts = String(req.headers['accept-encoding'] || '');
+  const encoding = accepts.includes('br') ? 'br' : accepts.includes('gzip') ? 'gzip' : null;
+  if (!encoding) return next();
+  const writes = [];
+  const write = res.write.bind(res);
+  const end = res.end.bind(res);
+  res.write = (chunk, ...args) => { if (chunk) writes.push(Buffer.from(chunk)); return true; };
+  res.end = (chunk, ...args) => {
+    if (chunk) writes.push(Buffer.from(chunk));
+    const body = Buffer.concat(writes);
+    const zipped = encoding === 'br' ? require('zlib').brotliCompressSync(body) : require('zlib').gzipSync(body);
+    res.removeHeader('Content-Length');
+    res.setHeader('Content-Encoding', encoding);
+    res.setHeader('Vary', 'Accept-Encoding');
+    write(zipped);
+    return end(...args);
+  };
+  next();
+});
+app.use(express.static(path.join(__dirname, 'public'), { cacheControl: false }));
 
 // A validation process must never seed, migrate, or run reminder jobs against
 // shared data. If an interrupted deployment later clears its persistent gate,
