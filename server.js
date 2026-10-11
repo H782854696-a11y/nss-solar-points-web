@@ -171,13 +171,17 @@ app.use((req, res, next) => {
 // Compress only text assets; images already use their own encodings and API
 // responses are intentionally left untouched.
 const TEXT_STATIC = /\.(?:html?|js|css|svg|json)$/i;
+function acceptsEncoding(header, name) {
+  const match = String(header || '').match(new RegExp(`(?:^|,)\\s*${name}\\s*(?:;\\s*q=([0-9.]+))?(?=,|$)`, 'i'));
+  return !!match && (match[1] === undefined || Number(match[1]) > 0);
+}
 app.use((req, res, next) => {
   if (!['GET', 'HEAD'].includes(req.method) || !TEXT_STATIC.test(req.path)) return next();
   if (req.originalUrl.includes('?v=')) res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
   else if (req.path === '/' || req.path === '/index.html' || req.path === '/service-worker.js') res.setHeader('Cache-Control', 'public, max-age=0, must-revalidate');
   if (req.method !== 'GET' || req.headers.range) return next();
-  const accepts = String(req.headers['accept-encoding'] || '');
-  const encoding = accepts.includes('br') ? 'br' : accepts.includes('gzip') ? 'gzip' : null;
+  const accepts = req.headers['accept-encoding'];
+  const encoding = acceptsEncoding(accepts, 'br') ? 'br' : acceptsEncoding(accepts, 'gzip') ? 'gzip' : null;
   if (!encoding) return next();
   const writes = [];
   const write = res.write.bind(res);
