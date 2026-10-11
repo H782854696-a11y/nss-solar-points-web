@@ -984,7 +984,7 @@ async function renderControlCenter(root) {
   const purchaseQuery = new URLSearchParams({ limit: '20', offset: String(state.purchaseOffset || 0) });
   if (state.purchaseFilters?.q) purchaseQuery.set('q', state.purchaseFilters.q);
   if (state.purchaseFilters?.stage) purchaseQuery.set('stage', state.purchaseFilters.stage);
-  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, auditData, operationData, accountData, announcementData, recentWorkflowData, recentTaskData, purchaseData, regionData, workflowStoreData] = await Promise.all([
+  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, auditData, operationData, accountData, announcementData, recentWorkflowData, recentActionableWorkflowData, recentTaskData, recentMyTaskData, purchaseData, regionData, workflowStoreData] = await Promise.all([
     mayViewWorkflows ? GET(`/api/v2/workflows?${workflowQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
     can('workflow.configure') ? GET('/api/v2/workflows/definitions') : Promise.resolve({ items: [] }),
     mayViewTasks ? GET(`/api/v2/tasks?${taskQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
@@ -998,7 +998,11 @@ async function renderControlCenter(root) {
     can('workflow.configure') && can('system.user.view') ? GET('/api/users').catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
     GET('/api/v2/announcements'),
     mayViewWorkflows ? GET('/api/v2/workflows?limit=10&offset=0') : Promise.resolve({ items: [] }),
+    // 「我的工作」不能先截取全局最近记录再过滤；否则较旧、但仍待当前账号
+    // 处理的审批会消失。让 API 先按 actionableForMe 过滤，再做展示上限。
+    mayViewWorkflows ? GET('/api/v2/workflows?limit=10&offset=0&actionable=1') : Promise.resolve({ items: [], total: 0 }),
     mayViewTasks ? GET('/api/v2/tasks?limit=10&offset=0') : Promise.resolve({ items: [] }),
+    mayViewTasks ? GET('/api/v2/tasks?limit=10&offset=0&mine=1') : Promise.resolve({ items: [], total: 0 }),
     can('purchase.view') ? GET(`/api/v2/purchase-shipments?${purchaseQuery.toString()}`).catch(() => ({ items: [], total: 0, offset: 0, limit: 20, countsByStage: {}, stages: PURCHASE_STAGES, inTransitTotal: 0, etaSoonTotal: 0 })) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 20, countsByStage: {}, stages: PURCHASE_STAGES, inTransitTotal: 0, etaSoonTotal: 0 }),
     // 组织架构工作区（2026-10-08）：区域档案用于展示组织下的区域分布。
     // ⚠️ 必须与解构变量同序追加在末尾（曾因位置错位导致数据取到别的接口）。
@@ -1068,13 +1072,14 @@ async function renderControlCenter(root) {
   // "待我审批"、导航红点和「我的工作」中的审批行必须采用同一口径：
   // 后端仅为当前用户可实际处理的项目标记 actionableForMe。可见但不归当前
   // 用户审批的记录保留在「最新动态」中，不能混进「我的工作」。
-  const recentApprovalMatters = (recentWorkflowData.items || [])
+  const recentApprovalMatters = (recentActionableWorkflowData.items || [])
     .filter(w => ACTIVE_CONTROL_TYPES[w.type] && w.actionableForMe)
     .map(w => ({ title: w.title, type: ccText('Approval', '审批'), kind: 'approval', status: ccStatus(w.status), area: 'approvals', date: w.updatedAt || w.createdAt }));
-  const recentTaskMatters = (recentTaskData.items || [])
+  const recentTaskMatters = (recentMyTaskData.items || [])
     .map(task => ({ title: task.title, type: ccText('Task', '任务'), kind: 'task', status: ccStatus(task.status), area: 'collaboration', date: task.updatedAt || task.createdAt }));
   const recentMatters = [...recentApprovalMatters, ...recentTaskMatters]
-    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || ''))).slice(0, 5);
+    .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
+  const recentWorkTotal = Number(recentActionableWorkflowData.total || 0) + Number(recentMyTaskData.total || 0);
   const recentActivity = [
     ...(recentWorkflowData.items || []).filter(w => ACTIVE_CONTROL_TYPES[w.type]).map(w => ({ title: w.title, type: ccText('Approval', '审批'), kind: 'approval', status: ccStatus(w.status), area: 'approvals', date: w.updatedAt || w.createdAt })),
     ...recentTaskMatters,

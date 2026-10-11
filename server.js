@@ -2098,6 +2098,7 @@ app.get('/api/v2/tasks/:id/attachments/:attachmentId/download', (req, res) => {
 
 app.get('/api/v2/tasks', (req, res) => {
   if (!guard.checkPerm(req, res, 'task.view')) return;
+  const u = getSessionUser(req);
   const status = String(req.query.status || ''), priority = String(req.query.priority || ''), storeId = String(req.query.storeId || ''), query = controlCenter.cleanText(req.query.q, 160).toLocaleLowerCase();
   const visible = (readAll('tasks') || []).filter(x => controlVisible(req, 'task.view', x)), counts = {};
   visible.forEach(x => { counts[x.status] = (counts[x.status] || 0) + 1; });
@@ -2106,6 +2107,7 @@ app.get('/api/v2/tasks', (req, res) => {
   if (priority) items = items.filter(x => x.priority === priority);
   if (storeId === 'none') items = items.filter(x => !x.storeId);
   else if (storeId) items = items.filter(x => (x.storeId || '') === storeId);
+  if (req.query.mine === '1') items = items.filter(x => x.createdBy === u.id || x.assigneeId === u.id);
   if (query) items = items.filter(x => [x.title, x.description, x.assigneeName, x.createdByName].filter(Boolean).join(' ').toLocaleLowerCase().includes(query));
   items.sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
   const total = items.length, limit = Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || 25));
