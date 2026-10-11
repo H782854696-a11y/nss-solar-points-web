@@ -197,7 +197,8 @@ async function bootstrap() {
     const fd = new FormData(e.target);
     const username = fd.get('username').trim();
     const password = fd.get('password');
-    $('#loginError').textContent = '';
+    const loginError = $('#loginError');
+    if (loginError) loginError.textContent = '';
     const btn = $('#loginSubmit'); btn.disabled = true; btn.textContent = t('login.submitting');
     try {
       const r = await POST('/api/auth/login', { username, password });
@@ -207,7 +208,8 @@ async function bootstrap() {
       if (state.me.mustChangePassword) renderMandatoryPasswordChange();
       else { showApp(); initApp(); }
     } catch (err) {
-      $('#loginError').textContent = err.message;
+      if (loginError) loginError.textContent = err.message;
+      else console.error('Login completed but application initialization failed', err);
     } finally {
       btn.disabled = false; btn.textContent = t('login.submit');
     }
@@ -1282,6 +1284,9 @@ async function renderControlCenter(root) {
       <section class="card cc-dashboard-panel cc-home-today"><div class="cc-home-panel-head"><h3>${ccText('Today’s priorities', '今日待办事项')}</h3><button type="button" data-cc-jump="approvals" data-cc-actionable-jump>${ccText('Open worklist', '打开工作清单')} →</button></div><div class="cc-dashboard-list">${recentMatters.map(x => `<button type="button" data-cc-jump="${x.area}" data-cc-recent><span><em>${escapeHtml(x.type)}</em><strong>${escapeHtml(x.title)}</strong><small>${escapeHtml(formattedDate(x.date))}</small></span><span class="cc-list-status">${escapeHtml(x.status)} →</span></button>`).join('') || `<span class="cc-muted">${ccText('No recent matters', '暂无最近事项')}</span>`}</div></section>
       <section class="card cc-dashboard-panel cc-home-progress"><h3>${ccText('Task completion', '任务完成情况')}</h3><div class="cc-home-progress-value"><strong>${taskDonePercent}%</strong><span>${ccText('completed', '已完成')}</span></div><div class="cc-home-progress-track"><i style="width:${taskDonePercent}%"></i></div><div class="cc-home-legend"><span><i class="done"></i>${ccText('Completed', '已完成')} <b>${Number(taskCounts.completed || 0)}</b></span><span><i class="active"></i>${ccText('In progress', '进行中')} <b>${Number(taskCounts.in_progress || 0)}</b></span><span><i class="waiting"></i>${ccText('Open', '待处理')} <b>${Number(taskCounts.open || 0)}</b></span></div><div class="cc-home-source">${ccText('Based on tasks visible to your account', '统计范围按当前账号权限过滤')}</div></section>
       ${mayViewWorkflows ? `<section class="card cc-dashboard-panel"><h3>${ccText('Approval status', '审批状态分布')}</h3>${renderStatusRing(workflowData.counts)}<div class="cc-ring-source">${ccText('Source: workflow counts', '来源：审批记录实时统计')}</div></section>` : ''}
+      <section class="card cc-dashboard-panel cc-layout-preview" aria-label="${ccText('Layout preview sample data', '布局预览示例数据')}"><div class="cc-home-panel-head"><h3>${ccText('Store task progress', '门店任务进度')}</h3><span class="cc-sample-badge">${ccText('Sample data', '示例数据')}</span></div><div class="cc-sample-progress"><span>Manila <i><b style="width:90%"></b></i>90%</span><span>Cebu <i><b style="width:75%"></b></i>75%</span><span>Davao <i><b style="width:60%"></b></i>60%</span></div><small>${ccText('Layout preview only. Not connected to business records.', '仅用于布局预览，不接入业务数据。')}</small></section>
+      <section class="card cc-dashboard-panel cc-layout-preview"><div class="cc-home-panel-head"><h3>${ccText('Exception alerts', '异常事项预警')}</h3><span class="cc-sample-badge">${ccText('Sample data', '示例数据')}</span></div><ul class="cc-sample-list"><li>Manila ${ccText('report needs information', '上报待补充')}</li><li>Cebu ${ccText('task is near due', '任务即将到期')}</li><li>Davao ${ccText('tracking needs follow-up', '跟单待跟进')}</li></ul></section>
+      <section class="card cc-dashboard-panel cc-layout-preview"><div class="cc-home-panel-head"><h3>${ccText('Latest activity', '最新动态')}</h3><span class="cc-sample-badge">${ccText('Sample data', '示例数据')}</span></div><ul class="cc-sample-list"><li>Cebu ${ccText('submitted a report', '提交了资金上报')}</li><li>${ccText('Operations updated a monthly task', '运营部更新了月度任务')}</li><li>${ccText('Store profile approval passed', '门店资料审批已通过')}</li></ul></section>
       <section class="card cc-dashboard-panel cc-home-operations"><div class="cc-home-panel-head"><h3>${ccText('Operations at a glance', '运营概况')}</h3><button type="button" data-cc-jump="storeops">${ccText('View details', '查看详情')} →</button></div><div class="cc-home-op-grid">${can('store.view') ? `<button type="button" data-cc-jump="storeops"><span>${ccText('Stores', '门店')}</span><strong>${operationStoreCount}</strong></button>` : ''}${can('store.view') ? `<button type="button" data-cc-jump="storeops"><span>${ccText('Inspection records', '巡检记录')}</span><strong>${Number(operationData.pages?.inspections?.total || 0)}</strong></button>` : ''}${can('store.view') ? `<button type="button" data-cc-jump="storeops"><span>${ccText('Issue records', '问题记录')}</span><strong>${Number(operationData.pages?.issues?.total || 0)}</strong></button>` : ''}${can('org.view') ? `<button type="button" data-cc-jump="org"><span>${ccText('Employees', '员工')}</span><strong>${employees.length}</strong></button>` : ''}</div><div class="cc-home-source">${ccText('Counts reflect records available in the current system.', '数据为当前系统可读取记录数，不代表门店完成率。')}</div></section>
     </div><div class="cc-detail-heading" hidden><strong id="ccDetailTitle"></strong><small id="ccDetailSubtitle"></small></div><div class="cc-workspace-stats" hidden></div></section>
     <section class="cc-section cc-ann-section" data-cc-area="announcements">

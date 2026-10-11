@@ -1035,3 +1035,15 @@
   .cc-region-directory-row > div { min-width: 0; overflow-wrap: anywhere; }
   .cc-region-directory-row button { flex-shrink: 0; }
 }
+/* Explicitly isolated sample-data panels for the approved dashboard layout preview. */
+.cc-layout-preview { border:1px dashed #9dbce5; background:linear-gradient(135deg,#fff 0%,#f4f9ff 100%); }
+.cc-sample-badge { display:inline-flex; align-items:center; border:1px solid #78a9e7; border-radius:999px; color:#175cae; background:#edf6ff; font-size:.75rem; font-weight:700; padding:.18rem .52rem; white-space:nowrap; }
+.cc-layout-preview small { display:block; color:#5e7595; font-size:.78rem; margin-top:.65rem; }
+.cc-sample-progress { display:grid; gap:.62rem; margin-top:.2rem; }
+.cc-sample-progress span { display:grid; grid-template-columns:70px minmax(72px,1fr) 34px; gap:.45rem; align-items:center; color:#173d71; font-weight:650; font-size:.86rem; }
+.cc-sample-progress i { display:block; height:.55rem; background:#e5edf7; border-radius:999px; overflow:hidden; }
+.cc-sample-progress b { display:block; height:100%; background:linear-gradient(90deg,#1688eb,#12ba96); border-radius:inherit; }
+.cc-sample-list { list-style:none; padding:0; margin:.15rem 0 0; }
+.cc-sample-list li { border-top:1px solid #e5edf7; color:#173d71; font-size:.88rem; padding:.55rem 0 .55rem 1.25rem; position:relative; }
+.cc-sample-list li::before { content:'•'; color:#1474ed; font-size:1.25rem; left:.25rem; position:absolute; top:.36rem; }
+@media (max-width:700px){.cc-sample-progress span{grid-template-columns:62px minmax(60px,1fr) 32px}.cc-layout-preview{min-width:0}}
