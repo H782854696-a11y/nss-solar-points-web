@@ -13,6 +13,7 @@ test('control center keeps my approval count and my-work approval rows on the ac
   assert.match(appSource, /const recentApprovalMatters = \(recentActionableWorkflowData\.items \|\| \[\]\)\s*\.filter\(w => ACTIVE_CONTROL_TYPES\[w\.type\] && w\.actionableForMe\)/);
   assert.match(appSource, /\$\{count\(workflowData\.pendingForMe\)\}/);
   assert.match(appSource, /data-c-work-kind="\$\{item\.kind\}"/);
+  assert.match(appSource, /allWorkFilter\.textContent = `\$\{ccText\('All', '全部'\)\} \$\{recentMatters\.length\}\/\$\{recentWorkTotal\}`/);
 });
 
 test('control center work filters are interactive and activity remains permission-visible', () => {

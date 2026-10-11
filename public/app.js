@@ -1363,6 +1363,13 @@ async function renderControlCenter(root) {
   root.querySelector('.cc-overview')?.setAttribute('hidden', '');
   root.querySelector('.cc-dashboard-grid')?.setAttribute('hidden', '');
   root.prepend(cHome);
+  // The compact home table intentionally fetches at most ten approvals/tasks.
+  // Show visible/total explicitly so a larger actionable queue is never implied
+  // to be fully rendered; the existing "View all" link opens the paginated list.
+  const allWorkFilter = $('[data-c-work-filter="all"]', cHome);
+  const approvalWorkFilter = $('[data-c-work-filter="approval"]', cHome);
+  if (allWorkFilter) allWorkFilter.textContent = `${ccText('All', '全部')} ${recentMatters.length}/${recentWorkTotal}`;
+  if (approvalWorkFilter) approvalWorkFilter.textContent = `${ccText('Approvals', '待审批')} ${recentApprovalMatters.length}/${count(workflowData.pendingForMe)}`;
   $$('[data-c-tab]', cHome).forEach(button => button.addEventListener('click', () => { const tab = button.dataset.cTab; $$('[data-c-tab]', cHome).forEach(item => item.classList.toggle('active', item === button)); $$('[data-c-pane]', cHome).forEach(pane => { pane.hidden = pane.dataset.cPane !== tab; }); }));
   $$('[data-c-work-filter]', cHome).forEach(button => button.addEventListener('click', () => {
     const filter = button.dataset.cWorkFilter;
