@@ -142,13 +142,18 @@
 .app-shell .cc-count-badge { flex: 0 0 auto; padding: 3px 9px; border-radius: 999px; background: var(--tint-100); color: var(--brand); font-size: 12px; }
 .app-shell .cc-loading { padding: 24px; }
 .app-shell .cc-home-hero { display:flex; align-items:flex-end; justify-content:space-between; gap:24px; min-height:112px; margin:0 0 12px; padding:10px 2px 16px; }
+.app-shell .cc-home-hero { position:relative; overflow:hidden; min-height:144px; margin:0 0 16px; padding:24px 28px; border:1px solid #dfeafb; border-radius:16px; background:linear-gradient(100deg, #f7fbff 0%, #e8f5ff 53%, rgba(230,245,255,.62) 100%); }
+.app-shell .cc-home-hero::after { content:''; position:absolute; z-index:0; right:-18px; bottom:-54px; width:47%; height:168px; opacity:.85; background:linear-gradient(143deg, transparent 0 35%, rgba(30,113,210,.18) 35.4% 38%, transparent 38.4% 51%, rgba(30,113,210,.16) 51.4% 54%, transparent 54.4%), linear-gradient(32deg, rgba(18,117,198,.17) 1px, transparent 1px); background-size:auto, 24px 20px; transform:skewX(-16deg); pointer-events:none; }
+.app-shell .cc-home-hero::before { content:'☀'; position:absolute; z-index:0; right:33%; top:19px; color:#f6b31a; font-size:42px; opacity:.92; }
+.app-shell .cc-home-hero-copy, .app-shell .cc-home-date { position:relative; z-index:1; }
 .app-shell .cc-home-eyebrow { margin-bottom:8px; color:var(--brand); font-size:10px; font-weight:700; letter-spacing:.12em; }
 .app-shell .cc-home-hero h1 { margin:0; color:var(--ink); font-size:26px; line-height:1.25; font-weight:700; letter-spacing:-.02em; }
 .app-shell .cc-home-hero p { margin:7px 0 0; color:var(--muted); font-size:14px; }
 .app-shell .cc-home-date { display:grid; gap:8px; max-width:360px; color:var(--muted); font-size:12px; text-align:right; }
 .app-shell .cc-home-date strong { color:#244A78; font-family:'Noto Sans SC','PingFang SC',sans-serif; font-size:15px; font-weight:600; }
 .app-shell .cc-admin-home .cc-overview-grid { grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; }
-.app-shell .cc-admin-home .cc-overview-card { min-height:112px; justify-content:center; border:1px solid var(--line); border-left:3px solid var(--brand); }
+.app-shell .cc-admin-home .cc-overview-card { min-height:120px; justify-content:center; border:1px solid var(--line); border-left:3px solid var(--brand); box-shadow:0 7px 18px rgba(15,43,78,.05); transition:transform .16s ease, box-shadow .16s ease; }
+.app-shell .cc-admin-home .cc-overview-card:hover { transform:translateY(-2px); box-shadow:0 12px 25px rgba(15,43,78,.11); }
 .app-shell .cc-admin-home .cc-overview-card.cc-tone-warning { border-left-color:var(--warn-ink); }
 .app-shell .cc-admin-home .cc-overview-card.cc-tone-danger { border-left-color:var(--danger-ink); }
 .app-shell .cc-admin-home .cc-overview-card.cc-tone-success { border-left-color:var(--ok-ink); }
@@ -157,8 +162,10 @@
 .app-shell .cc-dashboard-grid { grid-template-columns:minmax(0,1.4fr) minmax(280px,1fr); gap:14px; }
 .app-shell .cc-dashboard-panel { border-color:#E7EBF0; box-shadow:var(--shadow-card-rest); }
 .app-shell .cc-dashboard-panel h3 { color:var(--ink); font-size:15px; }
-.app-shell .cc-home-actions { grid-column:1/-1; }
+.app-shell .cc-home-actions { grid-column:1/-1; order:9; }
 .app-shell .cc-home-actions .cc-quick-actions { grid-template-columns:repeat(4,minmax(0,1fr)); }
+.app-shell .cc-home-actions .cc-quick-actions button { min-height:72px; border-radius:12px; background:linear-gradient(135deg, var(--surface), var(--tint-50)); }
+.app-shell .cc-home-actions .cc-quick-actions button > span:first-child { display:grid; place-items:center; width:34px; height:34px; border-radius:9px; background:#e8f2ff; }
 .app-shell .cc-home-panel-head { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:8px; }
 .app-shell .cc-home-panel-head h3 { margin:0; }
 .app-shell .cc-home-panel-head > button { border:0; background:none; color:var(--brand); font:inherit; font-size:12px; cursor:pointer; white-space:nowrap; }
@@ -179,6 +186,10 @@
 .app-shell .cc-home-op-grid button:hover { border-color:var(--brand); background:var(--tint-50); }
 .app-shell .cc-home-op-grid strong { color:var(--ink); font-size:18px; font-variant-numeric:tabular-nums; }
 .app-shell .cc-home-today .cc-dashboard-list button { min-height:56px; }
+.app-shell .cc-home-today { border-top:3px solid #2563eb; }
+.app-shell .cc-home-operations { border-top:3px solid #0e9f6e; }
+.app-shell .cc-status-ring { min-height:148px; }
+.app-shell[data-theme="dark"] .cc-home-hero { border-color:var(--line); background:linear-gradient(110deg,#142d4b,#183b5d); }
 .app-shell[data-theme="dark"] .cc-home-date strong { color:#A8C8EF; }
 .app-shell[data-theme="dark"] .cc-dashboard-panel { border-color:var(--line); }
 .app-shell .cc-loading-title, .app-shell .cc-loading-card, .app-shell .cc-loading-panel { background: linear-gradient(90deg, var(--line-soft), var(--line), var(--line-soft)); background-size: 200% 100%; animation: cc-shimmer 1.5s infinite; border-radius: 14px; }

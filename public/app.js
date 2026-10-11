@@ -1262,7 +1262,7 @@ async function renderControlCenter(root) {
   const operationStoreCount = stores.length;
   root.innerHTML = `
     <div class="cc-home-hero">
-      <div><div class="cc-home-eyebrow">${ccText('SOLARPOINTS V2 · MANAGEMENT WORKSPACE', 'SOLARPOINTS V2 · 企业管理工作台')}</div><h1>${ccText('Welcome back,', '欢迎回来，')} ${escapeHtml(homeName)}</h1><p>${ccText('Here is your company operations at a glance.', '这里是今天的公司运营概览。')}</p></div>
+      <div class="cc-home-hero-copy"><div class="cc-home-eyebrow">${ccText('SOLARPOINTS V2 · MANAGEMENT WORKSPACE', 'SOLARPOINTS V2 · 企业管理工作台')}</div><h1>${ccText('Welcome back,', '欢迎回来，')} ${escapeHtml(homeName)}</h1><p>${ccText('Here is your company operations at a glance.', '这里是今天的公司运营概览。')}</p></div>
       <div class="cc-home-date"><span>${escapeHtml(homeDate)}</span><strong>${ccText('Clean Energy · Brighter Tomorrow', '用清洁能源，点亮更美好的明天')}</strong></div>
     </div>
     <div class="cc-announcement-ticker"><span aria-hidden="true">📢</span><span class="cc-ticker-track"><span class="cc-ticker-content">${leadAnnouncement ? escapeHtml(leadAnnouncement.title) : ccText('No important announcement yet', '暂无重要公告')}</span></span><button type="button" data-cc-jump="announcements">${ccText('View all', '查看全部')} →</button></div>
