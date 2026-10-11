@@ -223,12 +223,14 @@ async function bootstrap() {
 
 function renderMandatoryPasswordChange() {
   showLogin();
-  const center = $('.login-center');
+  // The current login screen uses .login-entry (the earlier visual shell used
+  // .login-center). Keep the fallback for older cached shells, but never fail
+  // a successful first login because a presentation wrapper was renamed.
+  const center = $('.login-entry') || $('.login-center');
+  if (!center) return;
   const zh = String(locale()).toLowerCase().startsWith('zh');
   center.innerHTML = `
-    <img src="/logo-brand.png" alt="NSS Solar" class="login-logo" />
-    <h1 class="login-title">${zh ? '先设置新密码' : 'Set a new password'}</h1>
-    <div class="login-subtitle">${zh ? '首次登录前必须更换临时密码' : 'Change the temporary password before continuing'}</div>
+    <div class="login-welcome"><i aria-hidden="true"></i><h2>${zh ? '先设置新密码' : 'Set a new password'}</h2><p>${zh ? '首次登录前必须更换临时密码' : 'Change the temporary password before continuing'}</p></div>
     <form id="mandatoryPasswordForm" class="login-panel">
       <label class="field"><span class="field-label">${zh ? '当前临时密码' : 'Current temporary password'}</span><span class="input-wrap"><input name="currentPassword" type="password" autocomplete="current-password" required/></span></label>
       <label class="field"><span class="field-label">${zh ? '新密码（至少 6 位）' : 'New password (6 characters minimum)'}</span><span class="input-wrap"><input name="newPassword" type="password" autocomplete="new-password" required minlength="6"/></span></label>
