@@ -102,14 +102,12 @@ function syncLangButtons() {
     b.textContent = t('common.langSwitch');
     b.title = t('common.langSwitchTitle');
   });
-  const zhButton = $('#langBtnLogin');
-  const enButton = $('#langBtnLoginEn');
-  if (zhButton && enButton) {
+  const loginButton = $('#langBtnLogin');
+  if (loginButton) {
     const zh = getLang() === 'zh';
-    zhButton.classList.toggle('active', zh);
-    enButton.classList.toggle('active', !zh);
-    zhButton.setAttribute('aria-pressed', String(zh));
-    enButton.setAttribute('aria-pressed', String(!zh));
+    loginButton.innerHTML = `<span class="lang-option${zh ? ' is-active' : ''}">中文</span><span class="lang-divider" aria-hidden="true">/</span><span class="lang-option${zh ? '' : ' is-active'}">EN</span>`;
+    loginButton.title = t('common.langSwitchTitle');
+    loginButton.setAttribute('aria-label', t('common.langSwitchTitle'));
   }
 }
 
@@ -119,14 +117,16 @@ function bindLangButtons() {
   $$('#langBtn').forEach(b => {
     b.addEventListener('click', () => setLang(getLang() === 'zh' ? 'en' : 'zh'));
   });
-  $('#langBtnLogin')?.addEventListener('click', () => setLang('zh'));
-  $('#langBtnLoginEn')?.addEventListener('click', () => setLang('en'));
+  $('#langBtnLogin')?.addEventListener('click', () => setLang(getLang() === 'zh' ? 'en' : 'zh'));
   onChange(() => {
     syncLangButtons();
     /* 2026-10-07 i18n 修复：语言切换时必须重新应用 data-i18n，
        否则侧栏静态文案（分组标签、LOGO 副标题、导航项）仍停留在切换前的语言——
        这正是「英文界面 + 中文菜单」的根因。 */
     applyStatic();
+    const pwdToggle = $('#pwdToggle');
+    const pwdInput = document.querySelector('#loginForm input[name=password]');
+    if (pwdToggle && pwdInput) pwdToggle.title = t(pwdInput.type === 'text' ? 'login.hidePwd' : 'login.showPwd');
     if (!state.me) return;
     renderUserBlock();
     updateHeaderCrumb();
