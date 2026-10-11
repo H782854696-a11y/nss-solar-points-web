@@ -8,6 +8,8 @@ const path = require('node:path');
 const net = require('node:net');
 const { spawn } = require('node:child_process');
 
+const photo = { fileName: 'evidence.png', mimeType: 'image/png', data: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aX1cAAAAASUVORK5CYII=' };
+
 const initialPassword = 'LocalOnlyInitialPassword2026!';
 const changedPassword = 'LocalOnlyChangedPassword2026!';
 const userPassword = 'LocalOnlyUserPassword2026!';
@@ -90,8 +92,8 @@ test('store remediation creation and stocktake upload work in the isolated V2 fl
   assert.equal(managerAccount.status, 201, JSON.stringify(managerAccount.data));
   const managerCookie = await loginAndChange('v2_store_manager', userPassword, userChangedPassword);
   const managerStocktake = await request('POST', '/api/v2/workflows', {
-    type: 'stocktake', title: 'Store scoped stocktake',
-    form: { warehouseName: 'Local count location', countDate: '2026-10-04', reason: 'Isolated scope check', items: [{ itemCode: 'SCOPE-001', countedQuantity: 0 }] },
+    type: 'stocktake', images: [photo], title: 'Store scoped stocktake',
+    form: { storeId, warehouseName: 'Local count location', countDate: '2026-10-04', reason: 'Isolated scope check', items: [{ itemCode: 'SCOPE-001', countedQuantity: 0 }] },
   }, managerCookie);
   assert.equal(managerStocktake.status, 201, JSON.stringify(managerStocktake.data));
   assert.equal(managerStocktake.data.item.storeId, storeId, 'store manager request is bound to their store');
@@ -106,7 +108,7 @@ test('store remediation creation and stocktake upload work in the isolated V2 fl
   assert.equal(managerTasks.data.items.some(item => item.id === managerTask.data.item.id), true);
   const remediation = await request('POST', '/api/v2/workflows', {
     type: 'store_remediation', title: 'Isolated remediation check',
-    form: { storeName: 'Test location', issue: 'Broken safety sign', dueDate: '2026-12-31' },
+    form: { storeId, storeName: 'Test location', issue: 'Broken safety sign', dueDate: '2026-12-31' },
   }, admin);
   assert.equal(remediation.status, 201, JSON.stringify(remediation.data));
   const incomplete = await request('POST', '/api/v2/workflows', {
@@ -117,10 +119,10 @@ test('store remediation creation and stocktake upload work in the isolated V2 fl
   assert.equal(remediationList.data.items.some(item => item.id === remediation.data.item.id), true, 'remediation is visible in the list');
 
   // 盘点申请不受影响：仍可正常新建并出现在列表中
-  // （盘点要求 1–2,000 行明细或上传 Excel，故给一条明细，不能用空 items）
+  // 旧客户端提供的盘点明细/表格仍可附带提交，但不能替代新要求的图片凭证。
   const stocktakeStillWorks = await request('POST', '/api/v2/workflows', {
-    type: 'stocktake', title: 'Stocktake still accepted',
-    form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'regression', items: [{ itemCode: 'REGRESSION-001', countedQuantity: 0 }] },
+    type: 'stocktake', images: [photo], title: 'Stocktake still accepted',
+    form: { storeId, warehouseName: 'Manila', countDate: '2026-10-05', reason: 'regression', items: [{ itemCode: 'REGRESSION-001', countedQuantity: 0 }] },
   }, admin);
   assert.equal(stocktakeStillWorks.status, 201, JSON.stringify(stocktakeStillWorks.data));
   const afterBlockList = await request('GET', '/api/v2/workflows', null, admin);
@@ -131,12 +133,12 @@ test('store remediation creation and stocktake upload work in the isolated V2 fl
   XLSX.utils.book_append_sheet(workbook, XLSX.utils.aoa_to_sheet([['任意列', '自定义标题'], ['逆变器', '货物异常']]), '自定义盘点');
   const spreadsheet = Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: 'xlsx' }));
   const sourceFile = { fileName: '自定义盘点.xlsx', mimeType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', data: `data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,${spreadsheet.toString('base64')}` };
-  const fileOnly = await request('POST', '/api/v2/workflows', { type: 'stocktake', title: 'Custom sheet without item columns', form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Arbitrary Excel layout', items: [] }, sourceFile }, managerCookie);
+  const fileOnly = await request('POST', '/api/v2/workflows', { type: 'stocktake', images: [photo], title: 'Custom sheet without item columns', form: { storeId, warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Arbitrary Excel layout', items: [] }, sourceFile }, managerCookie);
   assert.equal(fileOnly.status, 201, JSON.stringify(fileOnly.data));
   assert.deepEqual(fileOnly.data.item.form.items, []);
-  assert.equal(fileOnly.data.item.attachments.length, 1);
-  assert.equal(fileOnly.data.item.attachments[0].name, sourceFile.fileName);
-  const downloaded = await fetch(`${base}/api/v2/workflows/${fileOnly.data.item.id}/attachments/${fileOnly.data.item.attachments[0].id}/download`, { headers: { cookie: managerCookie } });
+  assert.equal(fileOnly.data.item.attachments.length, 2);
+  assert.equal(fileOnly.data.item.attachments.find(x => x.name === sourceFile.fileName).name, sourceFile.fileName);
+  const downloaded = await fetch(`${base}/api/v2/workflows/${fileOnly.data.item.id}/attachments/${fileOnly.data.item.attachments.find(x => x.name === sourceFile.fileName).id}/download`, { headers: { cookie: managerCookie } });
   assert.equal(downloaded.status, 200);
   assert.deepEqual(Buffer.from(await downloaded.arrayBuffer()), spreadsheet);
   for (const [extension, mimeType] of [
@@ -146,15 +148,15 @@ test('store remediation creation and stocktake upload work in the isolated V2 fl
   ]) {
     const file = Buffer.from(XLSX.write(workbook, { type: 'buffer', bookType: extension }));
     const result = await request('POST', '/api/v2/workflows', {
-      type: 'stocktake', title: `Custom ${extension} workbook`,
-      form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Arbitrary Excel layout', items: [] },
+      type: 'stocktake', images: [photo], title: `Custom ${extension} workbook`,
+      form: { storeId, warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Arbitrary Excel layout', items: [] },
       sourceFile: { fileName: `自定义盘点.${extension}`, mimeType, data: `data:${mimeType};base64,${file.toString('base64')}` },
     }, managerCookie);
     assert.equal(result.status, 201, `${extension}: ${JSON.stringify(result.data)}`);
-    assert.equal(result.data.item.attachments[0].name, `自定义盘点.${extension}`);
+    assert.equal(result.data.item.attachments.some(x => x.name === `自定义盘点.${extension}`), true);
   }
-  const missingFile = await request('POST', '/api/v2/workflows', { type: 'stocktake', form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'No data', items: [] } }, managerCookie);
+  const missingFile = await request('POST', '/api/v2/workflows', { type: 'stocktake', form: { storeId, warehouseName: 'Manila', countDate: '2026-10-05', reason: 'No data', items: [] } }, managerCookie);
   assert.equal(missingFile.status, 400);
-  const falseExcel = await request('POST', '/api/v2/workflows', { type: 'stocktake', form: { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Invalid file', items: [] }, sourceFile: { ...sourceFile, data: 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,ZXhl' } }, managerCookie);
+  const falseExcel = await request('POST', '/api/v2/workflows', { type: 'stocktake', form: { storeId, warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Invalid file', items: [] }, sourceFile: { ...sourceFile, data: 'data:application/vnd.openxmlformats-officedocument.spreadsheetml.sheet;base64,ZXhl' } }, managerCookie);
   assert.equal(falseExcel.status, 400);
 });

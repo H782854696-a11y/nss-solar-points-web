@@ -1383,6 +1383,17 @@ app.post('/api/v2/regions', (req, res) => {
   const now = nowIso(), item = { id: nanoid(), code, name, organizationId: b.organizationId || null, countryCode: controlCenter.cleanText(b.countryCode || 'PH', 2).toUpperCase(), active: true, createdAt: now, updatedAt: now };
   items.push(item); writeAll('regions', items); recordControlAudit(req, u, 'region.create', 'region', item.id, { code, name }); res.status(201).json({ item });
 });
+app.put('/api/v2/regions/:id', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const items = readAll('regions') || [], item = items.find(x => x.id === req.params.id && x.active !== false);
+  if (!item) return res.status(404).json({ error: '区域不存在' });
+  if (!guard.check(req, res, 'org.manage', item)) return;
+  const code = controlCenter.cleanText(req.body?.code, 40).toUpperCase(), name = controlCenter.cleanText(req.body?.name, 120);
+  if (!code || !name) return res.status(400).json({ error: '区域编码和名称不能为空' });
+  if (items.some(x => x.id !== item.id && String(x.code).toUpperCase() === code)) return res.status(409).json({ error: '区域编码已存在' });
+  Object.assign(item, { code, name, updatedAt: nowIso() });
+  writeAll('regions', items); recordControlAudit(req, u, 'region.update', 'region', item.id, { code, name }); res.json({ item });
+});
 for (const directory of [
   { path: 'departments', collection: 'departments', name: '部门' },
   { path: 'positions', collection: 'positions', name: '岗位' },
@@ -1555,6 +1566,21 @@ app.get('/api/v2/workflows', (req, res) => {
   const offset = total ? Math.min(rawOffset, Math.floor((total - 1) / limit) * limit) : 0;
   res.json({ items: items.slice(offset, offset + limit).map(x => ({ ...x, actionableForMe: actionableIds.has(x.id) })), total, offset, limit, counts, countsByType, pendingForMe });
 });
+app.get('/api/v2/workflow-stores', (req, res) => {
+  if (!guard.checkPerm(req, res, 'workflow.create')) return;
+  res.json({ items: (readAll('stores') || []).filter(x => x.active !== false).map(x => ({ id: x.id, name: x.name, canSubmit: controlVisible(req, 'workflow.create', { storeId: x.id, regionId: x.regionId, country: x.country }) })) });
+});
+function resolveWorkflowStore(type, form, user, scope) {
+  const storeId = controlCenter.WORKFLOW_TYPES[type]?.storeRequired ? form.storeId : (scope.level === 'store' ? user.storeId : null);
+  const linkedStore = (readAll('stores') || []).find(x => x.id === storeId && x.active !== false);
+  if (storeId && !linkedStore) return { error: '请选择系统内有效的门店' };
+  if (scope.level === 'store' && !storeId) return { error: '账号尚未绑定门店' };
+  if (linkedStore) { form.storeId = linkedStore.id; form.storeName = linkedStore.name; }
+  const regionId = linkedStore?.regionId || (scope.level === 'region' ? scope.regionId : null);
+  const ix = countryIndexes();
+  const country = countryOf({ regionId, storeId }, ix.regionIndex, ix.storeIndex, ix.orgIndex) || user.country || 'PH';
+  return { storeId, regionId, country, createdBy: user.id };
+}
 app.post('/api/v2/workflows', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'workflow.create')) return;
@@ -1567,6 +1593,14 @@ app.post('/api/v2/workflows', (req, res) => {
   const valid = controlCenter.validateWorkflow(type, b.form, { allowEmptyStocktakeItems: !!source });
   if (!valid.ok) return res.status(400).json({ error: valid.error });
   const form = valid.value;
+  const photoResult = parseWorkflowImages(b.images, controlCenter.WORKFLOW_TYPES[type].photosRequired);
+  if (photoResult.error) return res.status(400).json({ error: photoResult.error });
+  const pendingFiles = [...photoResult.value, ...(source ? [source] : [])];
+  if (!workflowFilesFit({ attachments: [] }, pendingFiles)) return res.status(409).json({ error: '此申请附件最多 10 个，合计不超过 20MB' });
+  const scopeResource = resolveWorkflowStore(type, form, u, guard.scopeOf(req, 'workflow.create'));
+  if (scopeResource.error) return res.status(400).json({ error: scopeResource.error });
+  if (!guard.check(req, res, 'workflow.create', scopeResource)) return;
+  const { storeId, regionId, country: wfCountry } = scopeResource, warehouseId = null;
   if (source) form.sourceFileName = source.name;
   const sourceInspectionId = controlCenter.cleanText(b.sourceInspectionId, 100);
   const sourceInspection = sourceInspectionId ? (readAll('storeInspections') || []).find(x => x.id === sourceInspectionId) : null;
@@ -1579,19 +1613,6 @@ app.post('/api/v2/workflows', (req, res) => {
     if (existingRequest) return res.status(409).json({ error: `该巡检已关联未完成的门店整改申请（${existingRequest.id}）` });
   }
   if (sourceInspection && !guard.check(req, res, 'workflow.create', sourceInspection)) return;
-  const scope = guard.scopeOf(req, 'workflow.create');
-  const storesKnown = readAll('stores') || [];
-  const storeId = scope.level === 'store' ? u.storeId : null;
-  const linkedStore = storesKnown.find(x => x.id === storeId);
-  const warehouseId = null;
-  if (linkedStore && type === 'store_remediation') form.storeName = linkedStore.name;
-  if (scope.level === 'store' && !storeId) return res.status(403).json({ error: '账号尚未绑定门店' });
-  const regionId = scope.level === 'region' ? scope.regionId : (linkedStore?.regionId || null);
-  // 2026-10-08 审计 C-1：country 从真实归属推导，不再硬编码 'PH'。
-  // 门店归属的 country 已由 migrate 回填；集团级（无门店）用创建者账号的 country。
-  const wfCountry = countryOf({ regionId, storeId }, ...(() => { const ix = countryIndexes(); return [ix.regionIndex, ix.storeIndex, ix.orgIndex]; })()) || u.country || 'PH';
-  const scopeResource = { storeId, regionId, country: wfCountry, createdBy: u.id };
-  if (!guard.check(req, res, 'workflow.create', scopeResource)) return;
   let assignee = null;
   if (type === 'store_remediation' && form.assigneeId) {
     if (!guard.checkPerm(req, res, 'task.assign') || !guard.check(req, res, 'task.assign', { storeId, regionId, country: wfCountry, createdBy: u.id })) return;
@@ -1604,7 +1625,7 @@ app.post('/api/v2/workflows', (req, res) => {
   delete form.assigneeId;
   const items = readAll('workflowInstances') || [];
   const spec = controlCenter.WORKFLOW_TYPES[type];
-  const item = { id: nanoid(), type, title: controlCenter.cleanText(b.title || spec.label, 180), status: 'pending_approval', assigneeId: assignee?.id || null, assigneeName: assignee ? (assignee.name || assignee.username) : null, form, definitionId: null, definitionVersion: 1, storeId, warehouseId, regionId, organizationId: b.organizationId || null, sourceInspectionId: sourceInspection?.id || null, createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), country: wfCountry, currentStep: 0, approvalSlaHours: null, approvalDueAt: null, approvalReminderAt: null, approvalDelegations: [], executionRound: 0, externalDocumentNumber: null, executionStatus: null, executedBy: null, executedAt: null, comments: [], attachments: [] };
+  const item = { id: nanoid(), type, title: controlCenter.cleanText(b.title || [spec.label, form.storeName || form.orderNumber].filter(Boolean).join(' · '), 180), status: 'pending_approval', assigneeId: assignee?.id || null, assigneeName: assignee ? (assignee.name || assignee.username) : null, form, definitionId: null, definitionVersion: 1, storeId, warehouseId, regionId, organizationId: b.organizationId || null, sourceInspectionId: sourceInspection?.id || null, createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), country: wfCountry, currentStep: 0, approvalSlaHours: null, approvalDueAt: null, approvalReminderAt: null, approvalDelegations: [], executionRound: 0, externalDocumentNumber: null, executionStatus: null, executedBy: null, executedAt: null, comments: [], attachments: [] };
   const def = (readAll('workflowDefinitions') || []).find(x => x.type === type && x.active !== false);
   item.definitionId = def ? def.id : null;
   item.definitionVersion = def ? Number(def.version || 1) : 1;
@@ -1615,7 +1636,7 @@ app.post('/api/v2/workflows', (req, res) => {
   if (sourceInspection) {
     const sourceAttachments = Array.isArray(sourceInspection.attachments) ? sourceInspection.attachments : [];
     const validAttachments = sourceAttachments.filter(x => workflowAttachmentTypes[x.mimeType]?.ext && /^[A-Za-z0-9_-]+\.(pdf|png|jpg)$/.test(x.storedName || '') && fs.existsSync(path.join(storeOperationAttachmentDir, x.storedName)));
-    if (validAttachments.length > 10 || validAttachments.reduce((sum, x) => sum + Number(x.size || 0), 0) > 20 * 1024 * 1024) return res.status(409).json({ error: '来源巡检附件过多，请分批创建整改申请' });
+    if (!workflowFilesFit({ attachments: validAttachments }, pendingFiles)) return res.status(409).json({ error: '来源巡检附件与上传附件合计不能超过 10 个或 20MB' });
     fs.mkdirSync(path.dirname(workflowAttachmentDir), { recursive: true, mode: 0o700 }); fs.mkdirSync(workflowAttachmentDir, { recursive: true, mode: 0o700 });
     fs.chmodSync(path.dirname(workflowAttachmentDir), 0o700); fs.chmodSync(workflowAttachmentDir, 0o700);
     try {
@@ -1629,13 +1650,10 @@ app.post('/api/v2/workflows', (req, res) => {
       return res.status(500).json({ error: '复制巡检凭证失败，整改申请未创建' });
     }
   }
-  if (source) {
-    try { saveStocktakeSource(item, u, source); }
-    catch (err) { return res.status(500).json({ error: '保存盘点表格失败，申请未创建' }); }
-  }
   item.history = [{ action: 'submit', actorId: u.id, actorName: item.createdByName, note: '', createdAt: item.createdAt }];
   items.unshift(item);
   try {
+    for (const file of pendingFiles) saveStocktakeSource(item, u, file);
     writeAll('workflowInstances', items);
   } catch (err) {
     for (const attachment of item.attachments) {
@@ -1763,6 +1781,7 @@ app.post('/api/v2/workflows/:id/actions', (req, res) => {
   let assigneeChanged = false;
   let newAssignee = null;
   let pendingSource = null;
+  let pendingImages = [];
   if (action === 'resubmit') {
     if (req.body?.sourceFile && item.type !== 'stocktake') return res.status(400).json({ error: '只有盘点申请可以直接附加表格' });
     const sourceResult = req.body?.sourceFile ? parseStocktakeSourceFile(req.body.sourceFile) : null;
@@ -1771,14 +1790,20 @@ app.post('/api/v2/workflows/:id/actions', (req, res) => {
     if (pendingSource && !stocktakeSourceCapacity(item, pendingSource)) return res.status(409).json({ error: '此申请附件最多 10 个，合计不超过 20MB' });
     const valid = controlCenter.validateWorkflow(item.type, req.body?.form, { allowEmptyStocktakeItems: !!pendingSource || hasStocktakeSource(item) });
     if (!valid.ok) return res.status(400).json({ error: valid.error });
+    const photoResult = parseWorkflowImages(req.body?.images, controlCenter.WORKFLOW_TYPES[item.type].photosRequired && !(item.attachments || []).some(x => ['image/png','image/jpeg'].includes(x.mimeType) && fs.existsSync(path.join(workflowAttachmentDir, x.storedName))));
+    if (photoResult.error) return res.status(400).json({ error: photoResult.error });
+    pendingImages = photoResult.value;
+    if (!workflowFilesFit(item, [...pendingImages, ...(pendingSource ? [pendingSource] : [])])) return res.status(409).json({ error: '此申请附件最多 10 个，合计不超过 20MB' });
     if (pendingSource) valid.value.sourceFileName = pendingSource.name;
     else if (item.type === 'stocktake' && hasStocktakeSource(item)) valid.value.sourceFileName = item.form?.sourceFileName || (item.attachments || []).find(attachment => stocktakeSourceTypes[attachment.mimeType])?.name || '';
-    const scope = guard.scopeOf(req, 'workflow.create');
-    const nextStoreId = scope.level === 'store' ? u.storeId : null;
-    const nextStore = (readAll('stores') || []).find(x => x.id === nextStoreId);
-    const nextRegionId = scope.level === 'region' ? scope.regionId : (nextStore?.regionId || null);
-    if (!guard.check(req, res, 'workflow.create', { storeId: nextStoreId, regionId: nextRegionId, country: 'PH', createdBy: u.id })) return;
-    if (nextStore && item.type === 'store_remediation') valid.value.storeName = nextStore.name;
+    const nextScope = resolveWorkflowStore(item.type, valid.value, u, guard.scopeOf(req, 'workflow.create'));
+    if (nextScope.error) return res.status(400).json({ error: nextScope.error });
+    if (!guard.check(req, res, 'workflow.create', nextScope)) return;
+    const { storeId: nextStoreId, regionId: nextRegionId } = nextScope;
+    if (item.sourceInspectionId) {
+      const inspection = (readAll('storeInspections') || []).find(x => x.id === item.sourceInspectionId);
+      if (!inspection || inspection.storeId !== nextStoreId) return res.status(400).json({ error: '整改门店必须与来源巡检门店一致' });
+    }
     if (item.type === 'store_remediation' && Object.prototype.hasOwnProperty.call(valid.value, 'assigneeId')) {
       if (valid.value.assigneeId) {
         if (!guard.checkPerm(req, res, 'task.assign') || !guard.check(req, res, 'task.assign', { storeId: nextStoreId, regionId: nextRegionId, country: 'PH', createdBy: u.id })) return;
@@ -1795,7 +1820,7 @@ app.post('/api/v2/workflows/:id/actions', (req, res) => {
     delete valid.value.assigneeId;
     item.form = valid.value;
     if (item.type === 'store_remediation') item.overdueReminderAt = null;
-    item.storeId = nextStoreId; item.warehouseId = null; item.regionId = nextRegionId;
+    item.storeId = nextStoreId; item.warehouseId = null; item.regionId = nextRegionId; item.country = nextScope.country;
     item.title = controlCenter.cleanText(req.body?.title || item.title, 180);
   }
   const previousStep = item.currentStep;
@@ -1835,11 +1860,14 @@ app.post('/api/v2/workflows/:id/actions', (req, res) => {
   item.history.push({ action, actorId: u.id, actorName: u.name || u.username, note: result.note || controlCenter.cleanText(req.body?.note, 1000), createdAt: item.updatedAt });
   if (assigneeChanged) item.history.push({ action: 'assignee.update', actorId: u.id, actorName: u.name || u.username, note: item.assigneeName || '负责人已取消', createdAt: item.updatedAt });
   let savedSource = null;
+  const savedImages = [];
   try {
     if (pendingSource) savedSource = saveStocktakeSource(item, u, pendingSource);
+    for (const file of pendingImages) savedImages.push(saveStocktakeSource(item, u, file));
     writeAll('workflowInstances', items);
   } catch (err) {
     if (savedSource) { try { fs.unlinkSync(path.join(workflowAttachmentDir, savedSource.storedName)); } catch (cleanupError) {} }
+    for (const image of savedImages) { try { fs.unlinkSync(path.join(workflowAttachmentDir, image.storedName)); } catch (cleanupError) {} }
     return res.status(500).json({ error: '保存申请或表格失败，请重试' });
   }
   recordControlAudit(req, u, `workflow.${action}`, item.type, item.id, { status: item.status });
@@ -1866,6 +1894,27 @@ const workflowAttachmentTypes = {
   'application/vnd.ms-excel.sheet.binary.macroenabled.12': { ext: '.xlsb', signature: b => b.length >= 4 && b[0] === 0x50 && b[1] === 0x4b && b[2] === 0x03 && b[3] === 0x04 },
 };
 const stocktakeSourceTypes = Object.fromEntries(['text/csv', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'application/vnd.ms-excel', 'application/vnd.ms-excel.sheet.macroenabled.12', 'application/vnd.ms-excel.sheet.binary.macroenabled.12'].map(mime => [mime, workflowAttachmentTypes[mime]]));
+function parseWorkflowImages(raw, required = false) {
+  const images = raw === undefined ? [] : raw;
+  if (!Array.isArray(images) || images.length > 10) return { error: '图片附件最多 10 张' };
+  if (required && !images.length) return { error: '请上传至少一张图片附件' };
+  const value = []; let total = 0;
+  for (const file of images) {
+    const mimeType = String(file?.mimeType || '').toLowerCase(), type = workflowAttachmentTypes[mimeType];
+    const name = path.basename(String(file?.fileName || '')).replace(/[\\/\r\n\0]/g, '_').slice(0, 180);
+    if (!['image/png','image/jpeg'].includes(mimeType) || !name || typeof file?.data !== 'string' || file.data.length > 6_000_000) return { error: '请上传 PNG 或 JPG 图片，每张不超过 4MB' };
+    const match = file.data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
+    if (!match || match[1].toLowerCase() !== mimeType) return { error: '图片上传格式无效' };
+    const buffer = Buffer.from(match[2], 'base64'); total += buffer.length;
+    if (!buffer.length || buffer.length > 4 * 1024 * 1024 || !type.signature(buffer)) return { error: '图片格式不正确或超过 4MB' };
+    value.push({ name, mimeType, ext: type.ext, buffer });
+  }
+  if (total > 10 * 1024 * 1024) return { error: '本次上传图片合计不能超过 10MB' };
+  return { value };
+}
+function workflowFilesFit(item, files) {
+  return (item.attachments || []).length + files.length <= 10 && (item.attachments || []).reduce((sum, x) => sum + Number(x.size || 0), 0) + files.reduce((sum, x) => sum + x.buffer.length, 0) <= 20 * 1024 * 1024;
+}
 function parseStocktakeSourceFile(raw) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { error: '请选择 Excel 或 CSV 文件' };
   const name = path.basename(String(raw.fileName || '')).replace(/[\\/\r\n\0]/g, '_').slice(0, 180);
@@ -2160,6 +2209,7 @@ app.get('/api/v2/purchase-shipments', (req, res) => {
     total, offset, limit, countsByStage,
     stages: PURCHASE_STAGES,
     inTransitTotal: all.filter(x => ['ordered','preparing','loaded','in_transit'].includes(x.stage)).length,
+    nextExpectedArrival: all.filter(x => ['ordered','preparing','loaded','in_transit'].includes(x.stage) && !x.arrivalDate && isIsoCalendarDate(x.eta)).map(x => x.eta).sort()[0] || null,
     // 跟单仪表盘（2026-10-08）：7 天内预计到达 —— 按**全量**统计（列表只是一页），
     // 口径：填了 ETA、尚未入库、且 ETA 落在今天至 +7 天之间（含今天）。
     etaSoonTotal: (() => {
@@ -2418,7 +2468,7 @@ app.get('/api/v2/announcements', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const canManage = rbac.hasPermission(u, 'announcement.manage');
   const items = (readAll('announcements') || [])
-    .filter(x => x.status === 'published' || (canManage && req.query.includeDrafts === '1' && x.status === 'draft'))
+    .filter(x => x.status === 'published')
     .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
   res.json({ items, canManage });
 });
@@ -2427,7 +2477,8 @@ app.post('/api/v2/announcements', (req, res) => {
   if (!guard.checkPerm(req, res, 'announcement.manage')) return;
   const title = controlCenter.cleanText(req.body?.title, 180);
   const body = controlCenter.cleanText(req.body?.body, 5000);
-  const status = req.body?.status === 'draft' ? 'draft' : 'published';
+  if (req.body?.status && req.body.status !== 'published') return res.status(400).json({ error: '公告只能直接发布，不再支持草稿' });
+  const status = 'published';
   if (!title || !body) return res.status(400).json({ error: '请填写公告标题和内容' });
   const item = { id: nanoid(), title, body, status, pinned: !!req.body?.pinned,
     createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), country: u.country || 'PH' };
@@ -2442,7 +2493,7 @@ app.put('/api/v2/announcements/:id', (req, res) => {
   if (!item) return res.status(404).json({ error: '公告不存在' });
   const title = controlCenter.cleanText(req.body?.title, 180);
   const body = controlCenter.cleanText(req.body?.body, 5000);
-  if (!title || !body || !['draft', 'published', 'archived'].includes(req.body?.status)) return res.status(400).json({ error: '公告内容或状态无效' });
+  if (!title || !body || !['published', 'archived'].includes(req.body?.status)) return res.status(400).json({ error: '公告内容或状态无效' });
   Object.assign(item, { title, body, status: req.body.status, pinned: !!req.body.pinned, updatedAt: nowIso() });
   writeAll('announcements', items);
   recordControlAudit(req, u, 'announcement.update', 'announcement', item.id, { status: item.status, pinned: item.pinned });

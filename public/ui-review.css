@@ -532,7 +532,17 @@
 .app-shell .cc-org-management .cc-inline-form { margin-top:10px; }
 .app-shell .cc-tree-person, .app-shell .cc-tree-store { display:flex; align-items:center; gap:8px; min-height:30px; padding:3px 4px; color:var(--body); }
 .app-shell .cc-tree-person small, .app-shell .cc-tree-store small { margin-left:auto; color:var(--muted); font-size:11px; }
+.app-shell .cc-org-position > summary { gap:9px; }
+.app-shell .cc-org-position > summary > strong { min-width:0; }
+.app-shell .cc-org-position > summary > small { margin-left:auto; white-space:nowrap; }
+.app-shell .cc-position-actions { display:flex; justify-content:flex-end; margin:0 0 5px; }
+.app-shell .cc-position-add-person { flex:0 0 auto; min-height:30px; padding:4px 10px; color:var(--brand); border-color:var(--line); background:#fff; }
+.app-shell .cc-position-add-person:hover { background:var(--tint-50); border-color:var(--brand); }
+.app-shell .cc-person-modal-note { margin:0 0 16px; }
 @media (max-width:640px) {
+  .app-shell .cc-org-position > summary { flex-wrap:wrap; }
+  .app-shell .cc-position-actions { justify-content:flex-start; padding-left:27px; }
+  .app-shell .cc-tree-people { margin-left:10px; padding-left:12px; }
   .app-shell .cc-route-directory { padding:10px; }
   .app-shell .cc-route-directory-head { align-items:flex-start; flex-direction:column; gap:3px; }
   .app-shell .cc-route-picker > button { flex:1 1 145px; }
@@ -982,4 +992,35 @@
 }
 @media (max-width: 380px) {
   .login-a-auth { padding-inline: 14px; }
+}
+
+/* Compact workflow forms and genuine attachment inputs. */
+#ccWorkflowForm { max-width: 920px; }
+#ccWorkflowForm > button { margin-top: 18px; }
+.cc-photo-field, .cc-upload-panel { padding: 18px; border: 1px dashed var(--border, #cbd5e1); border-radius: 12px; background: var(--surface, #fff); }
+.cc-photo-field small { color: var(--text-muted, #64748b); font-weight: 400; line-height: 1.6; }
+.cc-photo-field input { max-width: 100%; min-width: 0; }
+.cc-photo-preview { display: flex; flex-wrap: wrap; gap: 12px; }
+.app-shell .cc-field.cc-photo-field > span.cc-photo-preview::after { content: none; }
+.app-shell .crumb-home { border: 0; background: none; color: var(--muted); font: inherit; cursor: pointer; padding: 0; }
+.app-shell .page-crumb { display: flex; align-items: center; gap: 10px; }
+.cc-photo-preview figure { margin: 0; width: 88px; }
+.cc-photo-preview img { width: 88px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid #e2e8f0; }
+.cc-photo-preview figcaption { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 400; }
+.cc-field[hidden] { display: none !important; }
+.cc-eta-stat strong { font-size: clamp(20px, 2vw, 28px); white-space: nowrap; }
+.cc-upload-panel { margin-top: 24px; }
+.cc-region-directory-row { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border, #e2e8f0); }
+.cc-region-directory-row:last-child { border-bottom: 0; }
+.cc-region-directory-row small { display: block; color: var(--text-muted, #64748b); margin-top: 5px; }
+.content[aria-busy="true"] { cursor: progress; }
+.content[aria-busy="true"]::before { content: ""; position: fixed; height: 3px; top: 0; left: 0; right: 0; background: #2563eb; z-index: 100; }
+@media (max-width: 900px) {
+  .app-shell:not(.nav-open) .sidebar { box-shadow: none; }
+}
+@media (max-width: 700px) {
+  .cc-photo-field, .cc-upload-panel { padding: 12px; }
+  .cc-region-directory-row { gap: 10px; }
+  .cc-region-directory-row > div { min-width: 0; overflow-wrap: anywhere; }
+  .cc-region-directory-row button { flex-shrink: 0; }
 }

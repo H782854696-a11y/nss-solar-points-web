@@ -9,6 +9,7 @@ const guard = require('../lib/rbac-guard');
 const validStocktake = (overrides = {}) => ({
   type: 'stocktake',
   form: {
+    storeId: 'store-1',
     warehouseName: 'Cebu Warehouse',
     countDate: '2026-10-04',
     reason: 'Quarterly count',
@@ -18,16 +19,16 @@ const validStocktake = (overrides = {}) => ({
 });
 
 test('configured management request types are available and retired legacy types remain disabled', () => {
-  assert.deepEqual(Object.keys(controlCenter.WORKFLOW_TYPES).sort(), ['discount_request', 'expense_reimbursement', 'purchase_request', 'stocktake', 'store_receipt', 'store_remediation']);
-  for (const removedType of ['purchase', 'expense', 'payment', 'transfer', 'stock_adjustment', 'price_adjustment']) {
+  assert.deepEqual(Object.keys(controlCenter.WORKFLOW_TYPES).sort(), ['discount_request', 'expense_reimbursement', 'stocktake', 'store_receipt', 'store_remediation']);
+  for (const removedType of ['purchase_request', 'purchase', 'expense', 'payment', 'transfer', 'stock_adjustment', 'price_adjustment']) {
     assert.equal(controlCenter.validateWorkflow(removedType, {}).ok, false, `${removedType} must remain disabled`);
   }
 });
 
 test('new configurable request types validate their required fields and amount', () => {
-  assert.equal(controlCenter.validateWorkflow('store_receipt', { storeName: 'Cebu', receiptDate: '2026-10-09', receiptSummary: '12 panels received' }).ok, true);
-  assert.equal(controlCenter.validateWorkflow('discount_request', { orderNumber: 'SO-1001', discountReason: 'Approved campaign', amount: '25.50' }).value.amount, 25.5);
-  assert.match(controlCenter.validateWorkflow('expense_reimbursement', { expenseDate: '2026-10-09', expenseCategory: 'Travel', amount: 0, reason: 'Client visit' }).error, /金额/);
+  assert.equal(controlCenter.validateWorkflow('store_receipt', { storeId: 'store-1', receiptDate: '2026-10-09', receiptNormal: 'yes', confirmedBy: 'Manager' }).ok, true);
+  assert.equal(controlCenter.validateWorkflow('discount_request', { orderNumber: 'SO-1001', originalAmount: '100.00', discountAmount: '25.50', finalAmount: '74.50' }).value.discountAmount, 25.5);
+  assert.match(controlCenter.validateWorkflow('expense_reimbursement', { storeId: 'store-1', expenseCategory: 'Travel' }).error, /费用类型/);
 });
 
 test('stocktake validates rows and computes final count variance', () => {
@@ -38,9 +39,9 @@ test('stocktake validates rows and computes final count variance', () => {
   assert.equal(result.value.items[0].varianceReason, 'Damaged in transit');
 });
 
-test('a stocktake may use an attached spreadsheet without structured item rows', () => {
-  const form = { warehouseName: 'Manila', countDate: '2026-10-05', reason: 'Count review', items: [] };
-  assert.match(controlCenter.validateWorkflow('stocktake', form).error, /Excel/);
+test('simplified stocktake needs a store but no spreadsheet or item rows', () => {
+  const form = { storeId: 'store-1', counterName: '' };
+  assert.equal(controlCenter.validateWorkflow('stocktake', {}).ok, false);
   const result = controlCenter.validateWorkflow('stocktake', form, { allowEmptyStocktakeItems: true });
   assert.equal(result.ok, true);
   assert.deepEqual(result.value.items, []);
@@ -62,7 +63,7 @@ test('workflow dates must be real calendar dates', () => {
   const invalidStocktake = validStocktake({ countDate: '2026-02-30' });
   assert.match(controlCenter.validateWorkflow('stocktake', invalidStocktake.form).error, /日期/);
 
-  const remediation = { storeName: 'Cebu Store', issue: 'Broken signage', dueDate: '2026-10-04' };
+  const remediation = { storeId: 'store-1', storeName: 'Cebu Store', issue: 'Broken signage', dueDate: '2026-10-04' };
   assert.equal(controlCenter.validateWorkflow('store_remediation', remediation).ok, true);
   assert.match(controlCenter.validateWorkflow('store_remediation', { ...remediation, dueDate: '2026-13-01' }).error, /日期/);
 });

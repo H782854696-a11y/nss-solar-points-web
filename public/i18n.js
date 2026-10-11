@@ -99,7 +99,7 @@
     'nav.groupOrganization': ['ORGANIZATION & PEOPLE', '组织与人员'],
     'nav.groupDailyOps': ['OPERATIONS', '业务协同'],
     'nav.groupSupply': ['SUPPLY CHAIN', '供应链'],
-    'nav.groupCommunications': ['COMMUNICATIONS', '沟通与通知'],
+    'nav.groupCommunications': ['COMPANY ANNOUNCEMENTS', '公司公告'],
     'nav.organization': ['Organization', '组织架构'],
     'nav.groupSystemAudit': ['SYSTEM & AUDIT', '系统与审计'],
     'nav.workspaceApprovals': ['Approval Center', '审批中心'],
@@ -278,7 +278,7 @@
   'purchase.bucket.delivered': ['Delivered', '已交货'],
   'purchase.bucket.inTransit': ['In transit', '运输中'],
   'purchase.bucket.arrived': ['Arrived', '已到达'],
-  'purchase.bucket.etaSoon': ['Arriving within 7 days', '预计 7 天内到达'],
+  'purchase.bucket.etaSoon': ['Expected arrival', '预计到达时间'],
     'header.searchPh': ['Search stores, tasks and workflows', '搜索门店 / 任务 / 流程'],
     'header.logout': ['Sign out', '退出登录'],
 
