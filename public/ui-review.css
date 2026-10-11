@@ -1,11 +1,11 @@
 /* Review-driven layout refinements, scoped to the management app. */
 .app-shell {
-  --nav-bg: #102B4E;
-  --nav-text: #E5EEF9;
-  --nav-muted: #9FB5CF;
-  --nav-line: #254365;
-  --nav-hover: #18395F;
-  --nav-active: #1C4777;
+  --nav-bg: var(--bg);
+  --nav-text: #374151;
+  --nav-muted: #6B7280;
+  --nav-line: var(--line);
+  --nav-hover: #EDF1F4;
+  --nav-active: #E3F6E9;
 }
 .app-shell .sidebar { border-right-color: var(--nav-line); }
 .app-shell .logo-row { border-bottom-color: var(--nav-line); }
@@ -16,15 +16,15 @@
 .app-shell .nav-item { border-left: 3px solid transparent; border-radius: 0 10px 10px 0; }
 .app-shell .nav-item .nav-icon { width: 26px; height: 26px; border-radius: 7px; background: rgba(255,255,255,.06); display: grid; place-items: center; flex: 0 0 auto; }
 .app-shell .nav-item .nav-icon svg { width: 15px; height: 15px; }
-.app-shell .nav-item.active .nav-icon { background: rgba(255,255,255,.16); }
-.app-shell .nav-item:hover { color: #fff; }
+.app-shell .nav-item.active .nav-icon { background: #D4F1DE; }
+.app-shell .nav-item:hover { color: var(--ink); }
 .app-shell .nav-item.active,
-.app-shell .nav-item-primary.active { color: #fff; background: #1C4777; border-left-color: #83B6FF; }
-.app-shell .nav-item.active svg { color: #fff; }
+.app-shell .nav-item-primary.active { color: #07954A; background: #E3F6E9; border-left-color: #16A34A; }
+.app-shell .nav-item.active svg { color: #07954A; }
 .app-shell .nav-item-primary { margin: 10px 10px 8px; border: 1px solid rgba(255,255,255,.12); border-left: 3px solid transparent; border-radius: 10px; background: rgba(255,255,255,.06); color: #F1F5F9; }
 .app-shell .nav-primary-arrow { margin-left: auto; font-size: 21px; line-height: 1; color: #93C5FD; }
 .app-shell .nav-item-primary:hover { background: var(--nav-hover); color: #fff; }
-.app-shell .nav-item-primary.active { border-color: rgba(96,165,250,.5); border-left-color: #83B6FF; background: linear-gradient(90deg, rgba(29,78,216,.4), rgba(29,78,216,.15)); }
+.app-shell .nav-item-primary.active { border-color: transparent; border-left-color: #16A34A; background: #E3F6E9; }
 .app-shell .nav-item:focus-visible,
 .app-shell button:focus-visible,
 .app-shell a:focus-visible { outline: 2px solid #84B8FF; outline-offset: 2px; }
@@ -418,8 +418,8 @@
 .app-shell .nav-item { border-radius: 8px; border-left: 3px solid transparent; }
 .app-shell .nav-item:hover { color: #fff; background: var(--nav-hover); }
 .app-shell .nav-item.active,
-.app-shell .nav-item-primary.active { color: #fff; background: var(--nav-active); border-left-color: var(--nav-accent); }
-.app-shell .nav-item.active svg { color: #fff; }
+.app-shell .nav-item-primary.active { color: #07954A; background: var(--nav-active); border-left-color: #16A34A; }
+.app-shell .nav-item.active svg { color: #07954A; }
 .app-shell .nav-item-primary {
   background: #22272D; border: 1px solid transparent;
   border-radius: 8px; color: #E6EDF3;

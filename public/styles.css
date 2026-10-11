@@ -48,7 +48,7 @@
   --line-row:     #F3F4F6;
 
   /* 白色侧栏 */
-  --nav-bg:       #FFFFFF;
+  --nav-bg:       var(--bg);
   --nav-text:     #374151;
   --nav-muted:    #9CA3AF;
   --nav-line:     #E5E7EB;
@@ -347,13 +347,13 @@ html[lang^="en"] #loginPage .login-submit { padding-right:58px; letter-spacing:.
 /* Logo 区：高 64px、图标约 30px 垂直居中、下缘 1px 分隔线 */
 .logo-row {
   display: flex; align-items: center;
-  padding: 0 18px; height: 64px; flex-shrink: 0;
+  padding: 0 20px; height: 88px; flex-shrink: 0;
   border-bottom: 1px solid var(--line);
 }
-/* logo.png 为白底不透明 PNG：白色侧栏上白底自然融合，直接展示完整横版 logo */
+/* App shell only: preserve the supplied horizontal mark at its native ratio. */
 .logo-row .brand-logo {
-  height: 30px; width: auto; object-fit: contain;
-  background: none; border-radius: 0; padding: 0;
+  display:block; width: min(100%, 188px); height: auto; object-fit: contain;
+  background: none; border-radius: 0; padding: 0; mix-blend-mode:multiply;
 }
 .nav-group { padding: 3px 12px; display: flex; flex-direction: column; gap: 4px; }
 .nav-group-legacy { display: block; }
@@ -372,13 +372,13 @@ html[lang^="en"] #loginPage .login-submit { padding-right:58px; letter-spacing:.
 }
 .nav-item:hover { background: var(--nav-hover); color: var(--ink); }
 /* 选中态 = 全站最重要的视觉锚点：Pale Green Surface + Green Icon/Text（不大面积用绿） */
-.nav-item.active { background: var(--tint-100); color: var(--brand); font-weight: 600; }
-.nav-item.active svg { color: var(--brand); }
+.nav-item.active { background: #e3f6e9; color: #07954a; font-weight: 600; }
+.nav-item.active svg { color: #07954a; }
 .nav-item svg { flex-shrink: 0; }
-.nav-item-primary { margin: 8px 0 16px; min-height: 46px; background: var(--tint-100); color: var(--brand); font-weight: 650; }
-.nav-item-primary:hover { background: var(--tint-200); color: var(--brand); }
-.nav-item-primary.active { background: var(--brand); color: #fff; }
-.nav-item-primary.active svg { color: #fff; }
+.nav-item-primary { margin: 8px 0 8px; min-height: 46px; background: transparent; color: var(--nav-text); font-weight: 650; }
+.nav-item-primary:hover { background: var(--nav-hover); color: var(--ink); }
+.nav-item-primary.active { background: #e3f6e9; color: #07954a; }
+.nav-item-primary.active svg { color: #07954a; }
 .cc-section { margin: 18px 0; }
 .cc-section h3 { margin: 0 0 12px; font-size: 16px; }
 .cc-org-tree { margin: 14px 0 18px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 14px; background: #fbfdff; }
@@ -1534,7 +1534,8 @@ select.filter-input { height: 38px; cursor: pointer; }
 .cc-org-sidebar { padding: 20px; border-right: 1px solid var(--line); background: #fbfdff; }
 .cc-org-sidebar-head, .cc-org-directory-head, .cc-org-table-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .cc-org-sidebar-head strong { font-size: 18px; }
-.cc-org-add { width: 28px; height: 28px; border: 1px solid var(--brand); border-radius: 50%; background: #fff; color: var(--brand); font-size: 22px; line-height: 22px; cursor: pointer; }
+.cc-org-add { display:inline-flex; align-items:center; justify-content:center; width:34px; height:34px; border:0; border-radius:6px; background:transparent; color:var(--brand); font-size:32px; font-weight:400; line-height:1; cursor:pointer; }
+.cc-org-add:hover, .cc-org-add:focus-visible { background:var(--tint-50); outline:0; }
 .cc-org-choice-list { display: grid; gap: 6px; margin-top: 16px; }
 .cc-org-choice { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 42px; padding: 8px 10px; border: 0; border-radius: 9px; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
 .cc-org-choice.active, .cc-org-choice:hover { background: #eaf3ff; color: var(--brand); }
