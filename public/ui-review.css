@@ -1047,3 +1047,4 @@
 .cc-sample-list li { border-top:1px solid #e5edf7; color:#173d71; font-size:.88rem; padding:.55rem 0 .55rem 1.25rem; position:relative; }
 .cc-sample-list li::before { content:'•'; color:#1474ed; font-size:1.25rem; left:.25rem; position:absolute; top:.36rem; }
 @media (max-width:700px){.cc-sample-progress span{grid-template-columns:62px minmax(60px,1fr) 32px}.cc-layout-preview{min-width:0}}
+.app-shell .cc-ui-icon{width:24px;height:24px;flex:0 0 24px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}.app-shell .cc-overview-card>.cc-ui-icon{color:var(--brand);margin-bottom:6px}.app-shell .cc-dashboard-list button>.cc-ui-icon{color:var(--brand);margin-right:10px}
