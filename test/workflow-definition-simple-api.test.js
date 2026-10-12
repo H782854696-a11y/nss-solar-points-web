@@ -1,0 +1,40 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { startLocalApp, photo } = require('./helpers/local-app');
+
+const types = ['stocktake', 'store_remediation', 'expense_reimbursement', 'discount_request', 'store_receipt'];
+
+test('approval settings use one authorized named user per new workflow and preserve old snapshots', { timeout: 30000 }, async t => {
+  const app = await startLocalApp(); t.after(app.close);
+  const admin = await app.login('admin');
+  const stores = (await app.request('GET', '/api/stores', null, admin)).data.items;
+  const storeId = stores[0].id;
+  const create = (type, form, images = [photo], cookie = admin) => app.request('POST', '/api/v2/workflows', { type, form, images }, cookie);
+  const old = await create('stocktake', { storeId });
+  assert.equal(old.status, 201, JSON.stringify(old.data));
+  const oldSnapshot = JSON.parse(JSON.stringify(old.data.item.approvalSteps));
+  const account = await app.request('POST', '/api/v2/users', { username: 'simple_route_approver', name: 'Simple Route Approver', role: 'philippines_manager', password: app.password }, admin);
+  assert.equal(account.status, 201, JSON.stringify(account.data));
+  const approverId = account.data.item.id;
+  const payload = Object.fromEntries(types.map(type => [type, { steps: [{ approvers: [{ kind: 'user', id: approverId }] }] }]));
+  assert.equal((await app.request('PUT', '/api/v2/workflows/definitions', { definitions: payload }, admin)).status, 200);
+  const definitions = await app.request('GET', '/api/v2/workflows/definitions', null, admin);
+  assert.equal(definitions.status, 200);
+  for (const type of types) assert.deepEqual(definitions.data.items.find(x => x.type === type).config.steps, [{ label: `${({ stocktake:'库存盘点', store_remediation:'门店整改', expense_reimbursement:'费用报销', discount_request:'订单优惠申请', store_receipt:'门店收货确认' })[type]}审批`, mode: 'any', approvers: [{ kind: 'user', id: approverId }] }]);
+  const oldAgain = (await app.request('GET', '/api/v2/workflows?limit=50', null, admin)).data.items.find(x => x.id === old.data.item.id);
+  assert.deepEqual(oldAgain.approvalSteps, oldSnapshot, 'saved route does not rewrite an in-flight approval snapshot');
+  const newer = await create('store_remediation', { storeId, issue: 'Repair sign' });
+  assert.equal(newer.status, 201);
+  assert.deepEqual(newer.data.item.approvalSteps[0].approvers, [{ kind: 'user', id: approverId }]);
+  const manager = await app.request('POST', '/api/v2/users', { username: 'simple_route_manager', name: 'Simple Route Manager', role: 'manager', storeId, password: app.password }, admin);
+  const managerLogin = await app.login('simple_route_manager');
+  assert.equal((await app.request('PUT', '/api/v2/workflows/definitions', { definitions: payload }, managerLogin)).status, 403, 'configuration permission remains enforced');
+  const invalid = JSON.parse(JSON.stringify(payload)); invalid.stocktake.steps[0].approvers = [{ kind: 'role', id: 'admin' }];
+  assert.equal((await app.request('PUT', '/api/v2/workflows/definitions', { definitions: invalid }, admin)).status, 400, 'roles and multi-level routes are rejected for new settings');
+  const data = JSON.parse(fs.readFileSync(path.join(app.dataDir, 'workflowInstances.json'), 'utf8'));
+  assert.ok(data.some(item => item.id === old.data.item.id), 'legacy expense/history storage remains readable');
+  assert.ok(manager.status === 201);
+});

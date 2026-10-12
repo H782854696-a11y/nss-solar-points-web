@@ -693,19 +693,22 @@ const CONTROL_FIELDS = [
   ['originalAmount', 'Original amount', '订单原金额', 'number'],
   ['discountAmount', 'Discount amount', '优惠金额', 'number'],
   ['finalAmount', 'Final order total', '订单优惠后总金额', 'number'],
-  ['expenseCategory', 'Expense category', '费用类型', 'select'],
+  ['expenseAmount', 'Reimbursement amount', '报销金额', 'number'],
+  ['expenseDescription', 'Expense description', '费用说明', 'textarea'],
 ];
 const CONTROL_FIELDS_BY_TYPE = {
   stocktake: ['storeId','counterName'],
   store_remediation: ['storeId','issue'],
   store_receipt: ['storeId','receiptDate','receiptNormal','exceptionReason','confirmedBy'],
   discount_request: ['orderNumber','originalAmount','discountAmount','finalAmount'],
-  expense_reimbursement: ['storeId','expenseCategory'],
+  expense_reimbursement: ['storeId','expenseAmount','expenseDescription'],
 };
-const EXPENSE_CATEGORIES = [
-  ['office_supplies','Office supplies','办公用品'], ['maintenance','Maintenance','维修费'],
-  ['transport','Transport','交通费'], ['accommodation','Accommodation','住宿费'],
-];
+// Historical reimbursement records keep their old category value readable;
+// this is display-only and is not offered on new or resubmitted forms.
+const LEGACY_EXPENSE_CATEGORIES = {
+  office_supplies: ['Office supplies', '办公用品'], maintenance: ['Maintenance', '维修费'],
+  transport: ['Transport', '交通费'], accommodation: ['Accommodation', '住宿费'],
+};
 const WORKFLOW_PHOTOS_REQUIRED = new Set(['stocktake','discount_request','expense_reimbursement']);
 function workflowPhotoField(type, existing = []) {
   const required = WORKFLOW_PHOTOS_REQUIRED.has(type) && !existing.some(x => ['image/png','image/jpeg'].includes(x.mimeType));
@@ -1236,11 +1239,15 @@ async function renderControlCenter(root) {
     const label = `${ccText(en,zh)} · ${optional ? ccText('Optional','选填') : ccText('Required','必填')}`;
     let control;
     if (type === 'select') {
-      const options = key === 'storeId' ? workflowStoreData.items.map(x => [x.id, x.name, x.canSubmit === false]) : key === 'receiptNormal' ? [['yes',ccText('Yes — normal receipt','是，正常收货')],['no',ccText('No — exception','否，异常收货')]] : EXPENSE_CATEGORIES.map(([id,en,zh]) => [id,ccText(en,zh)]);
-      const selected = value || (key === 'storeId' && state.me.storeId ? state.me.storeId : '');
+      const options = key === 'storeId' ? workflowStoreData.items.map(x => [x.id, x.name, x.canSubmit === false]) : [['yes',ccText('Yes — normal receipt','是，正常收货')],['no',ccText('No — exception','否，异常收货')]];
+      // Only prefill a store when the submitted form already has one or the
+      // current permission scope exposes exactly one valid store. A multi-store
+      // user must make an explicit choice; we never guess from account metadata.
+      const selectableStores = key === 'storeId' ? workflowStoreData.items.filter(item => item.canSubmit !== false) : [];
+      const selected = value || (key === 'storeId' && selectableStores.length === 1 ? selectableStores[0].id : '');
       control = `<select name="${key}" ${required}><option value="">${ccText('Please select','请选择')}</option>${options.map(([id,name,disabled]) => `<option value="${escapeHtml(id)}" ${id === selected ? 'selected' : ''} ${disabled ? 'disabled' : ''}>${escapeHtml(name)}${disabled ? ccText(' (outside your scope)','（无提交权限）') : ''}</option>`).join('')}</select>`;
     } else if (type === 'textarea') control = `<textarea name="${key}" rows="3" maxlength="2000" ${required}>${escapeHtml(value)}</textarea>`;
-    else control = `<input name="${key}" type="${type}" value="${escapeHtml(value)}" ${required} ${type === 'number' ? 'min="0" max="1000000000" step="0.01" inputmode="decimal"' : 'maxlength="500"'} ${key === 'finalAmount' ? 'readonly' : ''}/>`;
+    else control = `<input name="${key}" type="${type}" value="${escapeHtml(value)}" ${required} ${type === 'number' ? 'min="0.01" max="1000000000" step="0.01" inputmode="decimal"' : 'maxlength="500"'} ${key === 'finalAmount' ? 'readonly' : ''}/>${key === 'expenseAmount' ? `<small>PHP · ${ccText('Amount in Philippine pesos', '菲律宾比索')}</small>` : ''}`;
     return `<label class="cc-field ${type === 'textarea' ? 'cc-wide' : ''}"><span>${label}</span>${control}</label>`;
   }).join('');
   /* 2026-10-08 审批双栏：左列表选中态。默认选中第一条；筛选后若原选中不在列表内则回落到第一条。 */
@@ -1259,8 +1266,8 @@ async function renderControlCenter(root) {
       <div class="cc-meta">${Object.entries(w.form || {}).filter(([key,value]) => !['items','storeId'].includes(key) && value != null && String(value).trim() !== '').map(([key,value]) => {
         const field = CONTROL_FIELDS.find(x => x[0] === key);
         const label = field ? ccText(field[1],field[2]) : ({warehouseName:'仓库',batchNumber:'批次',countArea:'区域',countDate:'盘点日期',sourceFileName:'盘点表格',storeName:ccText('Store','门店'),dueDate:'整改期限',reason:'说明'})[key] || key;
-        const category = key === 'expenseCategory' ? EXPENSE_CATEGORIES.find(x => x[0] === value) : null;
-        const display = category ? ccText(category[1],category[2]) : key === 'receiptNormal' ? (value === 'yes' ? ccText('Yes','是') : ccText('No','否')) : value;
+        const category = key === 'expenseCategory' ? LEGACY_EXPENSE_CATEGORIES[value] : null;
+        const display = category ? ccText(category[0],category[1]) : key === 'receiptNormal' ? (value === 'yes' ? ccText('Yes','是') : ccText('No','否')) : value;
         return `${escapeHtml(label)}: ${escapeHtml(display)}`;
       }).join(' · ')}</div>
       ${w.type === 'stocktake' && Array.isArray(w.form?.items) && w.form.items.length ? `<details class="cc-history"><summary>${ccText('Review stocktake lines', '查看盘点明细')} (${w.form.items.length})</summary><div class="cc-stocktake-scroll"><table class="cc-stocktake-table"><thead><tr><th>${ccText('Item code', '商品编码')}</th><th>${ccText('Item name', '商品名称')}</th><th>${ccText('Bin', '库位')}</th><th>${ccText('Book', '账面')}</th><th>${ccText('Counted', '实盘')}</th><th>${ccText('Recount', '复盘')}</th><th>${ccText('Difference', '差异')}</th><th>${ccText('Reason', '原因')}</th><th>${ccText('Remark', '备注')}</th></tr></thead><tbody>${w.form.items.slice(0, 20).map(item => `<tr><td>${escapeHtml(item.itemCode || '')}</td><td>${escapeHtml(item.itemName || '')}</td><td>${escapeHtml(item.location || '')}</td><td>${escapeHtml(item.systemQuantity ?? '—')}</td><td>${escapeHtml(item.countedQuantity ?? '—')}</td><td>${escapeHtml(item.recountedQuantity ?? '—')}</td><td>${escapeHtml(stocktakeDifference(item))}</td><td>${escapeHtml(item.varianceReason || '')}</td><td>${escapeHtml(item.remark || '')}</td></tr>`).join('')}</tbody></table></div>${w.form.items.length > 20 ? `<div class="cc-meta">${ccText('First 20 lines are shown; download the full list.', '此处显示前 20 行，可下载完整明细。')}</div>` : ''}<button type="button" class="btn btn-sm" data-stocktake-export="${escapeHtml(w.id)}">${ccText('Download detail CSV', '下载完整盘点明细')}</button></details>` : ''}
@@ -1856,8 +1863,29 @@ async function renderControlCenter(root) {
       } catch (err) { submit.disabled = false; toast(err.message, 'error'); }
     });
   });
-  const definitionForm = $('#ccDefinitionForm');
+  let definitionForm = $('#ccDefinitionForm');
   if (definitionForm) {
+    // New routes intentionally use one named account per process. Existing
+    // instances retain their approvalSteps snapshot and are never altered here.
+    const definitionSection = definitionForm.closest('section');
+    const configuredUserId = type => definitions.find(x => x.type === type)?.config?.steps?.[0]?.approvers?.[0]?.kind === 'user'
+      ? definitions.find(x => x.type === type).config.steps[0].approvers[0].id : '';
+    const approvalTypes = Object.entries(CREATABLE_CONTROL_TYPES);
+    definitionSection.innerHTML = `<h3>${ccText('Approval workflow settings', '审批流程设置')}</h3><p>${ccText('Assign one eligible person to each process. New submissions are sent to that person.', '按流程类型指定一名审批人，让每一项申请找到负责人。')}</p><form id="ccSimpleDefinitionForm"><div class="cc-simple-route-table"><div class="cc-simple-route-head"><strong>${ccText('Process type', '流程类型')}</strong><strong>${ccText('Assigned approver', '指定审批人')}</strong></div>${approvalTypes.map(([type, names]) => `<label class="cc-simple-route-row"><span><i aria-hidden="true">${type === 'expense_reimbursement' ? '¥' : '□'}</i><strong>${escapeHtml(names[String(locale()).toLowerCase().startsWith('zh') ? 1 : 0])}</strong><b aria-hidden="true">→</b></span><select name="${escapeHtml(type)}" required><option value="">${ccText('Select an approver', '请选择审批人员')}</option>${approverPeople.map(person => `<option value="${escapeHtml(person.id)}" ${configuredUserId(type) === person.id ? 'selected' : ''}>${escapeHtml(person.name || person.username)}${person.department?.name ? ` · ${escapeHtml(person.department.name)}` : ''}</option>`).join('')}</select></label>`).join('')}</div><p class="cc-simple-route-note">ⓘ ${ccText('Saving affects only new submissions. Requests already in approval keep their current route.', '保存后仅对新提交的申请生效，正在审批中的申请保持不变。')}</p><div class="cc-actions cc-simple-route-actions"><button type="button" class="btn" data-simple-route-cancel>${ccText('Cancel', '取消')}</button><button class="btn btn-primary">${ccText('Save settings', '保存设置')}</button></div></form>`;
+    definitionForm = $('#ccSimpleDefinitionForm', definitionSection);
+    const restoreSimpleDefinition = () => approvalTypes.forEach(([type]) => { definitionForm.elements[type].value = configuredUserId(type); });
+    $('[data-simple-route-cancel]', definitionSection)?.addEventListener('click', restoreSimpleDefinition);
+    definitionForm.addEventListener('submit', async event => {
+      event.preventDefault();
+      const data = new FormData(definitionForm), definitionsPayload = {};
+      for (const [type] of approvalTypes) definitionsPayload[type] = { steps: [{ approvers: [{ kind: 'user', id: String(data.get(type) || '') }] }] };
+      try { await PUT('/api/v2/workflows/definitions', { definitions: definitionsPayload }); toast(ccText('Approval settings saved', '审批流程设置已保存'), 'success'); await renderControlCenter(root); }
+      catch (err) { toast(err.message, 'error'); }
+    });
+  }
+  /* Legacy multi-step editor is retained below for source compatibility only;
+     the active settings surface above replaces it with a single-person route. */
+  if (false && definitionForm) {
     let routeSteps = [];
     const setSelectedApprover = token => {
       const input = $('#ccApproverToken'); if (!input) return;

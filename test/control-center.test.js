@@ -28,7 +28,10 @@ test('configured management request types are available and retired legacy types
 test('new configurable request types validate their required fields and amount', () => {
   assert.equal(controlCenter.validateWorkflow('store_receipt', { storeId: 'store-1', receiptDate: '2026-10-09', receiptNormal: 'yes', confirmedBy: 'Manager' }).ok, true);
   assert.equal(controlCenter.validateWorkflow('discount_request', { orderNumber: 'SO-1001', originalAmount: '100.00', discountAmount: '25.50', finalAmount: '74.50' }).value.discountAmount, 25.5);
-  assert.match(controlCenter.validateWorkflow('expense_reimbursement', { storeId: 'store-1', expenseCategory: 'Travel' }).error, /费用类型/);
+  const reimbursement = controlCenter.validateWorkflow('expense_reimbursement', { storeId: 'store-1', expenseAmount: '25.50', expenseDescription: 'Taxi to store' });
+  assert.equal(reimbursement.ok, true);
+  assert.equal(reimbursement.value.expenseAmount, 25.5);
+  for (const amount of ['0', '0.00', '-1', '1.001', '1000000001', '1e2']) assert.equal(controlCenter.validateWorkflow('expense_reimbursement', { storeId: 'store-1', expenseAmount: amount, expenseDescription: 'Valid explanation' }).ok, false, amount);
 });
 
 test('stocktake validates rows and computes final count variance', () => {

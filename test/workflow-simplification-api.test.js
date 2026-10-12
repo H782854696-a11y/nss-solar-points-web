@@ -68,10 +68,14 @@ test('simplified approvals, store catalogue, regions, announcements and shipment
     for(const invalid of [{...form,finalAmount:'99.91'},{...form,discountAmount:'100.11'},{...form,originalAmount:'100.101'},{...form,discountAmount:'0.001'},{...form,orderNumber:''}]) assert.equal((await create('discount_request',invalid,[photo])).status,400);
     assert.equal((await create('discount_request',{orderNumber:'SO-zero',originalAmount:'1.00',discountAmount:'1.00',finalAmount:'0.00'},[photo])).status,201);
   });
-  await t.test('expense categories replace free text and purchase approval is retired',async () => {
-    for(const expenseCategory of ['office_supplies','maintenance','transport','accommodation']) assert.equal((await create('expense_reimbursement',{storeId,expenseCategory},[photo])).status,201);
-    assert.equal((await create('expense_reimbursement',{storeId,expenseCategory:'other'},[photo])).status,400);
-    assert.equal((await create('expense_reimbursement',{storeId,expenseCategory:'transport'})).status,400);
+  await t.test('expense reimbursement uses PHP amount, description and image evidence only',async () => {
+    const valid = await create('expense_reimbursement',{storeId,expenseAmount:'1234.50',expenseDescription:'Taxi and parking'},[photo]);
+    assert.equal(valid.status,201,JSON.stringify(valid.data));
+    assert.equal(valid.data.item.form.expenseAmount,1234.5);
+    assert.equal(valid.data.item.form.expenseCategory,undefined);
+    for(const expenseAmount of ['0','0.00','-1','1.001','1000000001','1e2']) assert.equal((await create('expense_reimbursement',{storeId,expenseAmount,expenseDescription:'Taxi'},[photo])).status,400,expenseAmount);
+    assert.equal((await create('expense_reimbursement',{storeId,expenseAmount:'10.00'},[photo])).status,400);
+    assert.equal((await create('expense_reimbursement',{storeId,expenseAmount:'10.00',expenseDescription:'Taxi'})).status,400);
     assert.equal((await create('purchase_request',{purchaseSummary:'Solar panels',amount:100,reason:'Stock'},[photo])).status,400);
   });
   await t.test('return and resubmit retain evidence and reject store scope bypass',async () => {

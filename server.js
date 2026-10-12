@@ -1681,33 +1681,65 @@ app.get('/api/v2/workflows/:id/assignees', (req, res) => {
   const users = (readAll('users') || []).filter(x => eligibleRemediationAssignee(u, x));
   res.json({ items: users.map(x => ({ id: x.id, name: x.name || x.username, username: x.username })) });
 });
+function normalizeSimpleWorkflowDefinition(type, raw, activeUsers) {
+  const steps = Array.isArray(raw) ? raw : [];
+  if (steps.length !== 1) return { error: '每个流程只能配置一名具体审批人' };
+  const approvers = Array.isArray(steps[0]?.approvers) ? steps[0].approvers : [];
+  if (approvers.length !== 1 || approvers[0]?.kind !== 'user') return { error: '每个流程只能选择一名具体审批人' };
+  const userId = controlCenter.cleanText(approvers[0].id, 100);
+  const user = activeUsers.find(x => x.id === userId && !x.disabled);
+  if (!user) return { error: '审批用户不存在或已停用' };
+  if (!rbac.hasPermission(user, 'workflow.approve') || !rbac.hasPermission(user, 'workflow.view')) return { error: '指定审批账号缺少流程查看或审批权限' };
+  return { value: [{ label: `${controlCenter.WORKFLOW_TYPES[type].label}审批`, mode: 'any', approvers: [{ kind: 'user', id: userId }] }] };
+}
+function saveWorkflowDefinitions(definitions, now) {
+  writeAll('workflowDefinitions', definitions);
+  return definitions;
+}
+app.put('/api/v2/workflows/definitions', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'workflow.configure')) return;
+  const submitted = req.body?.definitions;
+  const types = Object.keys(controlCenter.WORKFLOW_TYPES);
+  if (!submitted || typeof submitted !== 'object' || Array.isArray(submitted) || types.some(type => !Object.hasOwn(submitted, type)) || Object.keys(submitted).some(type => !types.includes(type))) return res.status(400).json({ error: '请为全部五类流程各选择一名审批人' });
+  const activeUsers = readAll('users') || [];
+  const normalized = {};
+  for (const type of types) {
+    const result = normalizeSimpleWorkflowDefinition(type, submitted[type]?.steps, activeUsers);
+    if (result.error) return res.status(400).json({ error: `${controlCenter.WORKFLOW_TYPES[type].label}：${result.error}` });
+    normalized[type] = result.value;
+  }
+  const defs = readAll('workflowDefinitions') || [], now = nowIso(), items = [];
+  for (const type of types) {
+    const existing = defs.find(x => x.type === type);
+    if (existing) {
+      existing.name = controlCenter.WORKFLOW_TYPES[type].label;
+      existing.version = Number(existing.version || 0) + 1;
+      existing.config = { steps: normalized[type], slaHours: existing.config?.slaHours ?? null };
+      existing.updatedAt = now; items.push(existing);
+    } else {
+      const item = { id: nanoid(), type, name: controlCenter.WORKFLOW_TYPES[type].label, version: 1, active: true, config: { steps: normalized[type], slaHours: null }, createdAt: now, updatedAt: now };
+      defs.push(item); items.push(item);
+    }
+  }
+  saveWorkflowDefinitions(defs, now);
+  recordControlAudit(req, u, 'workflow.definition.update', 'workflowDefinition', 'batch', { types, versions: items.map(x => ({ type: x.type, version: x.version })) });
+  res.json({ items });
+});
 app.put('/api/v2/workflows/definitions/:type', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'workflow.configure')) return;
   const type = String(req.params.type), b = req.body || {};
   if (!controlCenter.WORKFLOW_TYPES[type]) return res.status(404).json({ error: '流程类型不存在' });
-  const steps = Array.isArray(b.steps) ? b.steps : [];
-  if (!steps.length || steps.length > 10) return res.status(400).json({ error: '审批步骤须为 1 至 10 步' });
+  const activeUsers = readAll('users') || [];
+  const normalizedResult = normalizeSimpleWorkflowDefinition(type, b.steps, activeUsers);
+  if (normalizedResult.error) return res.status(400).json({ error: normalizedResult.error });
+  const normalized = normalizedResult.value;
   const slaHours = b.slaHours == null || b.slaHours === '' ? null : Number(b.slaHours);
   if (slaHours !== null && (!Number.isInteger(slaHours) || slaHours < 1 || slaHours > 720)) return res.status(400).json({ error: '审批时限须为 1 至 720 小时；留空表示不设时限' });
-  const validRoles = ['admin','owner','hq_operator','philippines_manager','regional_manager','purchaser','store_manager','sales','warehouse','service'];
-  const activeUsers = readAll('users') || [];
-  const normalized = [];
-  for (const step of steps) {
-    const approvers = Array.isArray(step.approvers) ? step.approvers.map(a => ({ kind: ['user','position'].includes(a.kind) ? a.kind : 'role', id: controlCenter.cleanText(a.id, 100) })).filter(a => a.id) : [];
-    if (!approvers.length || approvers.length > 20) return res.status(400).json({ error: '每个审批步骤至少需要 1 名用户或角色，最多 20 名' });
-    if (approvers.some(a => a.kind === 'role' && !validRoles.includes(a.id))) return res.status(400).json({ error: '审批角色不在系统角色清单内' });
-    if (approvers.some(a => a.kind === 'role' && (!rbac.hasPermission({ role: a.id }, 'workflow.approve') || !rbac.hasPermission({ role: a.id }, 'workflow.view')))) return res.status(400).json({ error: `角色“${a.id}”缺少流程查看或审批权限` });
-    if (approvers.some(a => a.kind === 'user' && !activeUsers.some(x => x.id === a.id && !x.disabled))) return res.status(400).json({ error: '审批用户不存在或已停用' });
-    if (approvers.some(a => a.kind === 'user' && (!rbac.hasPermission(activeUsers.find(x => x.id === a.id), 'workflow.approve') || !rbac.hasPermission(activeUsers.find(x => x.id === a.id), 'workflow.view')))) return res.status(400).json({ error: '指定审批账号缺少流程查看或审批权限' });
-    const activePositions = readAll('positions') || [];
-    if (approvers.some(a => a.kind === 'position' && !activePositions.some(x => x.id === a.id && x.active !== false))) return res.status(400).json({ error: '审批职位不存在或已停用' });
-    if (approvers.some(a => a.kind === 'position' && !activeUsers.some(x => userHoldsPosition(x, a.id) && rbac.hasPermission(x, 'workflow.approve') && rbac.hasPermission(x, 'workflow.view')))) return res.status(400).json({ error: '审批职位目前没有具备审批权限的在职账号' });
-    normalized.push({ label: controlCenter.cleanText(step.label || 'Approval', 100), mode: step.mode === 'all' ? 'all' : 'any', approvers });
-  }
   const defs = readAll('workflowDefinitions') || [], existing = defs.find(x => x.type === type);
   const now = nowIso();
-  if (existing) { existing.name = controlCenter.WORKFLOW_TYPES[type].label; existing.version = Number(existing.version || 0) + 1; existing.config = { steps: normalized, slaHours }; existing.updatedAt = now; }
+  if (existing) { existing.name = controlCenter.WORKFLOW_TYPES[type].label; existing.version = Number(existing.version || 0) + 1; existing.config = { steps: normalized, slaHours: Object.hasOwn(b, 'slaHours') ? slaHours : (existing.config?.slaHours ?? null) }; existing.updatedAt = now; }
   else defs.push({ id: nanoid(), type, name: controlCenter.WORKFLOW_TYPES[type].label, version: 1, active: true, config: { steps: normalized, slaHours }, createdAt: now, updatedAt: now });
   writeAll('workflowDefinitions', defs); recordControlAudit(req, u, 'workflow.definition.update', 'workflowDefinition', existing?.id || defs[defs.length - 1].id, { type, version: existing?.version || 1 });
   res.json({ item: existing || defs[defs.length - 1] });

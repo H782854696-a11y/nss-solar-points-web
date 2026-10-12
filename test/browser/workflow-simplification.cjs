@@ -35,7 +35,7 @@ const {startLocalApp,photo} = require('../helpers/local-app');
       stocktake:['storeId','counterName','images'],store_remediation:['storeId','issue','images'],
       store_receipt:['storeId','receiptDate','receiptNormal','exceptionReason','confirmedBy','images'],
       discount_request:['orderNumber','originalAmount','discountAmount','finalAmount','images'],
-      expense_reimbursement:['storeId','expenseCategory','images'],
+      expense_reimbursement:['storeId','expenseAmount','expenseDescription','images'],
     };
     assert.equal(await form.locator('[name="type"] option').count(),5);
     for(const [type,keys] of Object.entries(expected)){
@@ -45,6 +45,25 @@ const {startLocalApp,photo} = require('../helpers/local-app');
       assert.equal(await form.locator('[name="images"]').getAttribute('accept'),'image/png,image/jpeg');
       assert.equal(await form.locator('[name="images"]').evaluate(x=>x.required),['stocktake','discount_request','expense_reimbursement'].includes(type));
     }
+    await form.locator('[name="type"]').selectOption('expense_reimbursement');
+    assert.equal(await form.locator('[name="expenseAmount"]').getAttribute('step'),'0.01');
+    assert.match(await form.locator('small').filter({hasText:'PHP'}).textContent(),/PHP/);
+    await page.locator('.nav-item[data-workspace="governance"]').click();
+    const routes=page.locator('#ccSimpleDefinitionForm');
+    await routes.waitFor({state:'visible'});
+    assert.equal(await routes.locator('select').count(),5);
+    const routeSelects=routes.locator('select');
+    for(let index=0;index<5;index++) await routeSelects.nth(index).selectOption({index:1});
+    await routes.locator('[data-simple-route-cancel]').click();
+    assert.equal(await routeSelects.nth(0).inputValue(),'','cancel restores the persisted setting');
+    for(let index=0;index<5;index++) await routeSelects.nth(index).selectOption({index:1});
+    const saved=page.waitForResponse(r=>r.url().endsWith('/api/v2/workflows/definitions')&&r.request().method()==='PUT');
+    await routes.locator('button[type="submit"]').click();
+    assert.equal((await saved).status(),200);
+    await page.locator('#ccSimpleDefinitionForm').waitFor({state:'visible'});
+    assert.notEqual(await page.locator('#ccSimpleDefinitionForm select').first().inputValue(),'','saved settings survive the refresh');
+    await page.screenshot({path:path.join(outputDir,'approval-settings-desktop.png'),fullPage:true});
+    await page.locator('.nav-item[data-workspace="approvals"]').click();
     await form.locator('[name="type"]').selectOption('store_receipt');
     assert.equal(await form.locator('[name="exceptionReason"]').isVisible(),false);
     await form.locator('[name="receiptNormal"]').selectOption('no');

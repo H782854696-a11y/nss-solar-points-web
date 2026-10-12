@@ -392,6 +392,16 @@ html[lang^="en"] #loginPage .login-submit { padding-right:58px; letter-spacing:.
 .cc-tree-people { margin: 2px 0 8px 16px; padding-left: 15px; border-left: 1px solid #dce6f5; display: grid; gap: 5px; }
 .cc-tree-people > span { display: flex; gap: 8px; align-items: center; min-height: 28px; color: var(--ink); }
 .cc-approval-step-cards { display: grid; gap: 10px; margin: 14px 0; }
+.cc-simple-route-table { overflow:hidden; border:1px solid var(--line); border-radius:14px; background:#fff; margin:18px 0; }
+.cc-simple-route-head, .cc-simple-route-row { display:grid; grid-template-columns:minmax(180px,.95fr) minmax(240px,1.25fr); align-items:center; gap:28px; padding:18px 28px; border-bottom:1px solid var(--line-soft); }
+.cc-simple-route-head { background:#f5f8f8; color:var(--muted); font-size:13px; }
+.cc-simple-route-row:last-child { border-bottom:0; }
+.cc-simple-route-row > span { display:flex; align-items:center; gap:14px; color:var(--ink); }
+.cc-simple-route-row i { display:grid; place-items:center; width:42px; height:42px; border-radius:50%; background:var(--tint-100); color:var(--brand); font-style:normal; font-size:19px; font-weight:700; }
+.cc-simple-route-row b { margin-left:auto; color:#9aa8b7; font-size:28px; font-weight:400; }
+.cc-simple-route-row select { width:100%; min-height:46px; border:1px solid #d5dde4; border-radius:10px; background:#fff; padding:0 12px; color:var(--ink); }
+.cc-simple-route-note { margin:16px 0; padding:15px 18px; border-radius:10px; background:var(--tint-50); color:var(--brand-dark); }
+.cc-simple-route-actions { justify-content:flex-end; }
 .cc-approval-step-card { padding: 12px; border: 1px solid var(--line); border-left: 3px solid var(--brand); border-radius: 10px; background: #fff; }
 .cc-approval-step-card > div:first-child { display: flex; align-items: center; gap: 10px; }
 .cc-approval-step-card select { min-height: 32px; }
@@ -442,6 +452,7 @@ html[lang^="en"] #loginPage .login-submit { padding-right:58px; letter-spacing:.
 .cc-stocktake-table .cc-stocktake-empty { padding: 22px; text-align: center; color: var(--muted); }
 .cc-stocktake-pager { margin: 8px 0 14px; }
 @media (max-width: 700px) { .cc-form-grid { grid-template-columns: minmax(0, 1fr); } .cc-wide { grid-column: auto; } .cc-card-top { flex-direction: column; } .cc-task-filters { grid-template-columns: 1fr 1fr; } .cc-task-filters input, .cc-task-filters span { grid-column: 1 / -1; } .cc-workflow-filters { grid-template-columns: 1fr 1fr; } .cc-workflow-filters input, .cc-workflow-filters span { grid-column: 1 / -1; } }
+@media (max-width: 700px) { .cc-simple-route-head { display:none; } .cc-simple-route-row { grid-template-columns:1fr; gap:10px; padding:15px; } .cc-simple-route-row b { margin-left:auto; } }
 .sidebar-spacer { flex: 1; }
 .user-block {
   display: flex; align-items: center; gap: 10px;
