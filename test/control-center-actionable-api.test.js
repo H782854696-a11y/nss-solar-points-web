@@ -39,6 +39,13 @@ test('actionable workflow query keeps an older current-user approval when global
 
   const older = await app.request('POST', '/api/v2/workflows', stocktake(storeId, 'Older actionable approval'), managerChange.cookie);
   assert.equal(older.status, 201, JSON.stringify(older.data));
+  const managerAll = await app.request('GET', '/api/v2/workflows?limit=25&offset=0', null, managerChange.cookie);
+  assert.equal(managerAll.status, 200);
+  assert.equal(managerAll.data.items.some(item => item.id === older.data.item.id), true, 'creator can still see their own pending request in all approvals');
+  assert.equal(managerAll.data.pendingForMe, 0, 'creator has no actionable approval count for their own request');
+  const managerActionable = await app.request('GET', '/api/v2/workflows?limit=25&offset=0&actionable=1', null, managerChange.cookie);
+  assert.equal(managerActionable.status, 200);
+  assert.equal(managerActionable.data.total, 0, 'the My pending approvals view matches the creator badge');
   for (let index = 0; index < 11; index += 1) {
     const own = await app.request('POST', '/api/v2/workflows', stocktake(storeId, `New own approval ${index}`), admin);
     assert.equal(own.status, 201, JSON.stringify(own.data));

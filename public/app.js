@@ -1069,6 +1069,7 @@ async function renderControlCenter(root) {
     return `<button type="button" class="card cc-overview-card cc-tone-${empty ? 'success' : tone}${failed ? ' is-error' : ''}" ${failed ? 'data-cc-retry' : `data-cc-jump="${area}" ${actionable ? 'data-cc-actionable-jump' : ''}`}>${ccIcon(icon)}<span>${label}</span><strong>${failed ? ccText('Not available', '未能读取') : value.toLocaleString()}</strong><small>${failed ? ccText('Retry', '重试加载') : empty ? ccText('Clear', '已清空') : ccText('Open details', '查看详情') + ' →'}</small></button>`;
   };
   const count = value => value == null || !Number.isFinite(Number(value)) ? NaN : Number(value);
+  const pendingForMe = count(workflowData.pendingForMe);
   // "待我审批"、导航红点和「我的工作」中的审批行必须采用同一口径：
   // 后端仅为当前用户可实际处理的项目标记 actionableForMe。可见但不归当前
   // 用户审批的记录保留在「最新动态」中，不能混进「我的工作」。
@@ -1363,6 +1364,22 @@ async function renderControlCenter(root) {
   root.querySelector('.cc-overview')?.setAttribute('hidden', '');
   root.querySelector('.cc-dashboard-grid')?.setAttribute('hidden', '');
   root.prepend(cHome);
+  const approvalSection = $('[data-cc-area="approvals"]', root);
+  if (approvalSection) {
+    const actionableOnly = !!state.workflowFilters?.actionable;
+    const heading = $('h3', approvalSection);
+    if (heading) heading.textContent = actionableOnly ? ccText('My pending approvals', '待我审批') : ccText('All approvals', '全部审批');
+    const scopeNote = document.createElement('p');
+    scopeNote.className = 'cc-meta cc-approval-scope';
+    scopeNote.textContent = actionableOnly
+      ? ccText('Only requests that you can approve at the current step are shown.', '仅显示当前步骤中你可审批的申请。')
+      : ccText('All approval records visible under your permissions are shown. Use My pending approvals to match the sidebar count.', '显示你有权限查看的全部审批记录；点击“待我审批”可查看与侧栏数字一致的项目。');
+    heading?.insertAdjacentElement('afterend', scopeNote);
+    const actionableButton = $('[data-workflow-actionable]', approvalSection);
+    if (actionableButton) actionableButton.textContent = actionableOnly
+      ? ccText('Show all approvals', '显示全部审批')
+      : `${ccText('My pending approvals', '待我审批')} (${pendingForMe})`;
+  }
   // The compact home table intentionally fetches at most ten approvals/tasks.
   // Show visible/total explicitly so a larger actionable queue is never implied
   // to be fully rendered; the existing "View all" link opens the paginated list.
@@ -1467,7 +1484,9 @@ async function renderControlCenter(root) {
     syncPurchasePolling();
   };
   const setNavBadge = (id, value) => { const badge = $(id); if (!badge) return; badge.hidden = !Number.isFinite(value) || value <= 0; badge.textContent = Number.isFinite(value) ? String(value) : ''; };
-  setNavBadge('#navApprovalCount', mayViewWorkflows ? count(workflowData.pendingForMe) : 0);
+  setNavBadge('#navApprovalCount', mayViewWorkflows ? pendingForMe : 0);
+  const approvalLabel = $('#navApprovalLabel');
+  if (approvalLabel) { approvalLabel.hidden = !mayViewWorkflows || pendingForMe <= 0; approvalLabel.textContent = pendingForMe > 0 ? ccText('My pending', '待我审批') : ''; }
   setNavBadge('#navTaskCount', mayViewTasks && taskData.counts ? count(taskData.counts.open || 0) + count(taskData.counts.in_progress || 0) : 0);
   setNavBadge('#navAnnouncementCount', announcements.filter(item => item.status === 'published').length);
   // 采购跟单徽标：在途批次数（下单/备货/已开船/在途），已入库不再计入
@@ -4547,8 +4566,6 @@ async function renderAccounts(root) {
 
   const summary = t('accounts.summary', { total: fmt(items.length), active: fmt(enabledCount) });
   const storeAccountCount = items.filter(x => x.storeId || boundStoreOf(x.id)).length;
-  const accountBadge = $('#navAccountCount');
-  if (accountBadge) { accountBadge.hidden = !items.length; accountBadge.textContent = items.length ? String(items.length) : ''; }
   root.innerHTML = `
     <div class="page-header">
       <div class="page-header-text">

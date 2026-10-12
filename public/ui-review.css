@@ -30,6 +30,8 @@
 .app-shell a:focus-visible { outline: 2px solid #84B8FF; outline-offset: 2px; }
 .app-shell .nav-count { margin-left: auto; min-width: 20px; padding: 2px 6px; border-radius: 999px; background: #D93F3F; color: #fff; font-size: 10.5px; font-weight: 700; text-align: center; }
 .app-shell .nav-count-neutral { background: rgba(255,255,255,.13); color: #DCE8F8; }
+.app-shell .nav-pending-label { margin-left: auto; color: var(--nav-muted); font-size: 10px; white-space: nowrap; }
+.app-shell .nav-pending-label + .nav-count { margin-left: 4px; }
 .app-shell .user-block { border-top-color: var(--nav-line); }
 .app-shell .user-block { cursor: pointer; }
 .app-shell .user-block:hover { background: var(--nav-hover); }
