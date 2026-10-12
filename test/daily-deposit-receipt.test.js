@@ -44,8 +44,10 @@ test('daily deposit receipt is reviewed in a confirm/reject flow and rejected re
   const admin = (await request('POST', '/api/auth/login', { username: 'admin', password: changedPassword })).cookie;
   const stores = await request('GET', '/api/stores', null, admin);
   const storeId = stores.data.items[0].id;
-  const createdManager = await request('POST', '/api/v2/users', { username: 'deposit_manager', password: managerPassword, name: '存款店长', role: 'manager', storeId }, admin);
-  assert.equal(createdManager.status, 201, JSON.stringify(createdManager.data));
+  const pendingManager = await request('POST', '/api/v2/users', { username: 'deposit_manager', password: managerPassword, name: '存款店长', storeId }, admin);
+  assert.equal(pendingManager.status, 201, JSON.stringify(pendingManager.data));
+  const createdManager = await request('PUT', `/api/v2/users/${pendingManager.data.item.id}/role`, { role: 'manager' }, admin);
+  assert.equal(createdManager.status, 200, JSON.stringify(createdManager.data));
   const manager = (await request('POST', '/api/auth/login', { username: 'deposit_manager', password: managerPassword })).cookie;
 
   assert.equal((await request('POST', `/api/v2/daily-deposits/${storeId}/confirm`, {}, manager)).status, 400, 'receipt is required');

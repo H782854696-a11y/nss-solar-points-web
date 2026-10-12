@@ -11,11 +11,12 @@ test('workspace layouts remain display-only and prefer account override, departm
   const original = await app.request('GET', '/api/v2/workspace-settings/me', null, admin);
   assert.equal(original.status, 200);
   const personal = await app.request('PUT', '/api/v2/workspace-settings/me', {
-    settings: { defaultWorkspace: 'approvals', menuOrder: ['approvals', 'overview'], homeModules: ['my_tasks'] },
+    settings: { defaultWorkspace: 'approvals', visibleMenus: ['approvals'], menuOrder: ['approvals'], homeModules: ['my_tasks'] },
   }, admin);
   assert.equal(personal.status, 200);
   assert.equal(personal.data.hasPersonalOverride, true);
   assert.equal(personal.data.effectiveSettings.defaultWorkspace, 'approvals');
+  assert.deepEqual(personal.data.effectiveSettings.visibleMenus, ['approvals']);
   // Unknown menu/module values are ignored rather than becoming hidden permissions or executable settings.
   assert.equal(personal.data.effectiveSettings.menuOrder.includes('system.audit'), false);
   const restored = await app.request('DELETE', '/api/v2/workspace-settings/me', null, admin);
@@ -47,7 +48,9 @@ test('workspace settings UI exposes department defaults, account overrides and c
   assert.match(app, /workspace-settings\/departments/);
   assert.match(app, /旧职位默认仅兼容读取/);
   assert.match(app, /data-workspace-account/);
-  assert.match(app, /Only features already authorized/);
+  assert.match(app, /Visible workspace functions/);
+  assert.match(app, /visibleMenus/);
+  assert.doesNotMatch(app, /data-layout-move/);
   assert.match(server, /workspace-settings\/me/);
   assert.match(server, /workspace-settings\/users\/:userId/);
   assert.match(server, /workspace-settings\/departments/);

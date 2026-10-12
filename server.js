@@ -323,20 +323,27 @@ const WORKSPACE_HOME_MODULES = ['my_tasks', 'approval_reminders', 'announcements
 function cleanWorkspaceSettings(raw) {
   const source = raw && typeof raw === 'object' ? raw : {};
   const ordered = Array.isArray(source.menuOrder) ? source.menuOrder.filter(x => WORKSPACE_LAYOUT_KEYS.includes(x)) : [];
-  const menuOrder = [...new Set(ordered.concat(WORKSPACE_LAYOUT_KEYS))];
-  const defaultWorkspace = WORKSPACE_LAYOUT_KEYS.includes(source.defaultWorkspace) ? source.defaultWorkspace : 'overview';
+  // Older layouts only stored an order, which meant every item was visible.
+  // A display layout may now hide an entry, but it never grants an entry the
+  // account is not otherwise authorized to use.
+  const requestedVisible = Array.isArray(source.visibleMenus) ? source.visibleMenus.filter(x => WORKSPACE_LAYOUT_KEYS.includes(x)) : (ordered.length ? ordered : WORKSPACE_LAYOUT_KEYS);
+  const visibleMenus = [...new Set(requestedVisible)];
+  if (!visibleMenus.length) visibleMenus.push('overview');
+  const menuOrder = [...new Set(ordered.filter(x => visibleMenus.includes(x)).concat(visibleMenus))];
+  const defaultWorkspace = visibleMenus.includes(source.defaultWorkspace) ? source.defaultWorkspace : (visibleMenus.includes('overview') ? 'overview' : visibleMenus[0]);
   const modules = Array.isArray(source.homeModules) ? [...new Set(source.homeModules.filter(x => WORKSPACE_HOME_MODULES.includes(x)))] : WORKSPACE_HOME_MODULES;
-  return { menuOrder, defaultWorkspace, homeModules: modules };
+  return { menuOrder, visibleMenus, defaultWorkspace, homeModules: modules };
 }
 function workspaceLayoutFor(user) {
   const all = readAll('workspaceLayouts') || [];
   const employee = user?.employeeId ? (readAll('employees') || []).find(x => x.id === user.employeeId && x.active !== false) : null;
   const position = employee?.positionId || null;
   const department = employee?.departmentId || (position ? (readAll('positions') || []).find(x => x.id === position)?.departmentId : null) || null;
+  const departmentRecord = department ? (readAll('departments') || []).find(x => x.id === department && x.active !== false) : null;
   const positionLayout = position ? all.find(x => x.kind === 'position' && x.positionId === position) : null;
   const departmentLayout = department ? all.find(x => x.kind === 'department' && x.departmentId === department) : null;
   const personalLayout = user ? all.find(x => x.kind === 'user' && x.userId === user.id) : null;
-  return { departmentId: department, departmentSettings: departmentLayout ? cleanWorkspaceSettings(departmentLayout.settings) : null, legacyPositionId: position, legacyPositionSettings: positionLayout ? cleanWorkspaceSettings(positionLayout.settings) : null, personalSettings: personalLayout ? cleanWorkspaceSettings(personalLayout.settings) : null, effectiveSettings: cleanWorkspaceSettings(personalLayout?.settings || departmentLayout?.settings || positionLayout?.settings), hasPersonalOverride: !!personalLayout };
+  return { departmentId: department, departmentName: departmentRecord?.name || null, departmentSettings: departmentLayout ? cleanWorkspaceSettings(departmentLayout.settings) : null, legacyPositionId: position, legacyPositionSettings: positionLayout ? cleanWorkspaceSettings(positionLayout.settings) : null, personalSettings: personalLayout ? cleanWorkspaceSettings(personalLayout.settings) : null, effectiveSettings: cleanWorkspaceSettings(personalLayout?.settings || departmentLayout?.settings || positionLayout?.settings), hasPersonalOverride: !!personalLayout };
 }
 app.get('/api/v2/workspace-settings/me', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
@@ -1399,6 +1406,42 @@ function approvalSlotsForUser(instance, user) {
   if (!step || !user) return [];
   return (step.approvers || []).filter(a => a.kind === 'user' ? a.id === user.id : a.kind === 'position' ? userHoldsPosition(user, a.id) : rbac.normalizeRole(a.id) === rbac.normalizeRole(user.role)).map(a => `${a.kind}:${a.id}`);
 }
+// A route is selected by employee profile, never by a client-supplied account
+// id.  Keep the relationship deliberately strict: an ambiguous old data link
+// must be repaired by an administrator instead of silently choosing an account.
+function workflowApproverAccounts(employee, users = readAll('users') || []) {
+  return users.filter(account => account.id === employee?.userId || account.employeeId === employee?.id);
+}
+function workflowApproverIdentity(employeeId, users = readAll('users') || [], employees = readAll('employees') || []) {
+  const employee = employees.find(x => x.id === employeeId && x.active !== false);
+  if (!employee) return { reason: '员工档案不存在或已归档' };
+  const accounts = workflowApproverAccounts(employee, users);
+  if (!accounts.length) return { employee, reason: '未关联登录账号' };
+  if (accounts.length !== 1) return { employee, reason: '关联登录账号不唯一' };
+  const user = accounts[0];
+  if (user.disabled) return { employee, user, reason: '关联账号已停用' };
+  if (rbac.normalizeRole(user.role) === 'pending_authorization') return { employee, user, reason: '关联账号尚未授权' };
+  return { employee, user, reason: null };
+}
+// Frozen, per-instance access for a named current approver. It grants no role
+// and cannot reveal another workflow. Country remains fail-closed; cross-team
+// assignment is limited to department/store as explicitly approved.
+function explicitWorkflowAccess(instance, user) {
+  if (!instance?.assignedApproverAccess || instance.status !== 'pending_approval' || !user || user.disabled || rbac.normalizeRole(user.role) === 'pending_authorization') return false;
+  if (!instance.country || !user.country || instance.country !== user.country) return false;
+  const assignments = instance.assignedApproverAccess.steps?.[instance.currentStep] || [];
+  // Object records are the new immutable server-generated contract. Do not
+  // grant this exception to interim/legacy string snapshots: those continue
+  // through normal RBAC and cannot acquire a new cross-scope capability.
+  const assignment = assignments.find(x => x && typeof x === 'object' && x.userId === user.id && x.employeeId);
+  if (!assignment) return false;
+  const identity = workflowApproverIdentity(assignment.employeeId);
+  const slot = `user:${user.id}`;
+  const alreadySigned = (instance.stepApprovals || []).some(x => x.step === instance.currentStep && x.approverKey === slot);
+  return !alreadySigned && identity.user?.id === user.id && approvalSlotsForUser(instance, user).includes(slot);
+}
+function canReadAssignedWorkflow(req, instance, user) { return controlVisible(req, 'workflow.view', instance) || explicitWorkflowAccess(instance, user); }
+function canDecideAssignedWorkflow(req, instance, user) { return controlVisible(req, 'workflow.approve', instance) || explicitWorkflowAccess(instance, user); }
 function approvalSlotForActor(instance, user) {
   if (!user) return null;
   const stepApprovals = (instance.stepApprovals || []).filter(x => x.step === instance.currentStep);
@@ -1418,12 +1461,12 @@ function notifyCurrentApprovers(instance) {
     const delegation = (instance.approvalDelegations || []).find(x => x.step === instance.currentStep && x.approverKey === approverKey);
     if (delegation) {
       const user = users.find(x => x.id === delegation.userId && !x.disabled);
-      if (user && rbac.hasPermission(user, 'workflow.approve') && rbac.hasPermission(user, 'workflow.view') && rbac.can(user, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(user, 'workflow.view', { ...instance, country: 'PH' })) ids.add(user.id);
+      if (user && (explicitWorkflowAccess(instance, user) || (rbac.hasPermission(user, 'workflow.approve') && rbac.hasPermission(user, 'workflow.view') && rbac.can(user, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(user, 'workflow.view', { ...instance, country: 'PH' })))) ids.add(user.id);
       continue;
     }
     if (approver.kind === 'user') {
       const user = users.find(x => x.id === approver.id && !x.disabled);
-      if (user && rbac.hasPermission(user, 'workflow.approve') && rbac.hasPermission(user, 'workflow.view') && rbac.can(user, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(user, 'workflow.view', { ...instance, country: 'PH' })) ids.add(user.id);
+      if (user && (explicitWorkflowAccess(instance, user) || (rbac.hasPermission(user, 'workflow.approve') && rbac.hasPermission(user, 'workflow.view') && rbac.can(user, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(user, 'workflow.view', { ...instance, country: 'PH' })))) ids.add(user.id);
     } else if (approver.kind === 'position') {
       users.filter(x => !x.disabled && userHoldsPosition(x, approver.id))
         .filter(x => rbac.hasPermission(x, 'workflow.approve') && rbac.hasPermission(x, 'workflow.view') && rbac.can(x, 'workflow.approve', { ...instance, country: 'PH' }) && rbac.can(x, 'workflow.view', { ...instance, country: 'PH' }))
@@ -1459,11 +1502,9 @@ app.post('/api/v2/users', (req, res) => {
   const actor = getSessionUser(req); if (!actor) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'system.user.edit')) return;
   const b = req.body || {}, username = controlCenter.cleanText(b.username, 48), name = controlCenter.cleanText(b.name, 120);
-  const password = String(b.password || ''), role = String(b.role || '');
-  const allowedRoles = ['admin','owner','hq_operator','philippines_manager','regional_manager','purchaser','manager','sales','warehouse','service'];
+  const password = String(b.password || ''), role = 'pending_authorization';
   if (!/^[a-zA-Z0-9_]{3,48}$/.test(username)) return res.status(400).json({ error: '用户名须为 3 至 48 位英文字母、数字或下划线' });
   if (!name || password.length < 6) return res.status(400).json({ error: '请填写姓名，并设置至少 6 位的初始密码' });
-  if (!allowedRoles.includes(role)) return res.status(400).json({ error: '角色无效' });
   const users = readAll('users') || [];
   if (users.some(x => x.username.toLowerCase() === username.toLowerCase())) return res.status(409).json({ error: '用户名已存在' });
   const stores = readAll('stores') || [], regions = readAll('regions') || [], employees = readAll('employees') || [];
@@ -1471,26 +1512,54 @@ app.post('/api/v2/users', (req, res) => {
   const region = b.regionId ? regions.find(x => x.id === b.regionId && x.active !== false) : null;
   if (b.storeId && !store) return res.status(400).json({ error: '所选门店不存在' });
   if (b.regionId && !region) return res.status(400).json({ error: '所选区域不存在或已停用' });
-  if (['manager','sales','warehouse','service'].includes(role) && !store) return res.status(400).json({ error: '该岗位必须绑定门店' });
-  if (role === 'regional_manager' && !region) return res.status(400).json({ error: '区域经理必须绑定区域' });
   if (store && region && store.regionId && store.regionId !== region.id) return res.status(400).json({ error: '所选门店与区域不匹配' });
   const employee = b.employeeId ? employees.find(x => x.id === b.employeeId && x.active !== false) : null;
   if (b.employeeId && !employee) return res.status(400).json({ error: '员工档案不存在或已停用' });
   if (employee?.userId) return res.status(409).json({ error: '该员工已关联登录账号' });
   if (employee?.storeId && store && employee.storeId !== store.id) return res.status(400).json({ error: '员工档案门店与账号绑定门店不一致' });
-  if (role === 'regional_manager' && employee?.storeId && region && stores.find(x => x.id === employee.storeId)?.regionId !== region.id) return res.status(400).json({ error: '员工所属门店与账号绑定区域不一致' });
-  if (role === 'manager' && store?.managerId) return res.status(409).json({ error: '该门店已有店长账号，请先在门店管理中更换或解绑' });
   // 账号国家归属（2026-10-08 审计 C-1）：有区域→区域国家；有门店→门店区域国家；
   // 无门店无区域时按角色语义（菲律宾相关角色默认 PH），再退到传入 country，缺省 CN。
   const PH_ROLES = new Set(['philippines_manager', 'regional_manager', 'store_manager', 'manager', 'sales', 'warehouse', 'service']);
   const storeRegion = store?.regionId ? regions.find(x => x.id === store.regionId) : null;
   const userCountry = region?.countryCode || storeRegion?.countryCode || (PH_ROLES.has(role) ? 'PH' : (b.country || 'CN'));
-  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, storeId: store?.id || null, regionId: role === 'regional_manager' ? region.id : (region?.id || store?.regionId || null), employeeId: employee?.id || null, phone: controlCenter.cleanText(b.phone, 80), createdAt: nowIso(), disabled: false, mustChangePassword: false, country: userCountry };
+  // Store/region are prepared account metadata, not permissions. Keeping them
+  // lets the later protected role grant validate and apply the intended scope.
+  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, storeId: store?.id || null, regionId: region?.id || store?.regionId || null, employeeId: employee?.id || null, phone: '', createdAt: nowIso(), disabled: false, mustChangePassword: false, country: userCountry };
   users.push(user); writeAll('users', users);
   if (employee) { employee.userId = user.id; employee.name = name; if (!employee.storeId && store) employee.storeId = store.id; if (!employee.regionId) employee.regionId = user.regionId; employee.updatedAt = nowIso(); writeAll('employees', employees); }
-  if (role === 'manager' && store) { store.managerId = user.id; store.managerName = name; writeAll('stores', stores); }
   recordControlAudit(req, actor, 'user.create', 'user', user.id, { role, storeId: user.storeId, regionId: user.regionId, employeeId: user.employeeId });
   const { password: _password, ...safe } = user; res.status(201).json({ item: safe });
+});
+app.put('/api/v2/users/:id/role', (req, res) => {
+  const actor = getSessionUser(req); if (!actor) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.user.edit')) return;
+  // Role assignment is deliberately narrower than ordinary account editing:
+  // no manager or other middle role may self-promote or grant global roles.
+  if (rbac.normalizeRole(actor.role) !== 'admin') return res.status(403).json({ error: '仅系统管理员可授予账号角色' });
+  const role = String((req.body || {}).role || '');
+  const allowed = ['admin','owner','hq_operator','philippines_manager','regional_manager','purchaser','manager','sales','warehouse','service'];
+  if (!allowed.includes(role)) return res.status(400).json({ error: '角色无效' });
+  const users = readAll('users') || [], target = users.find(x => x.id === req.params.id);
+  if (!target) return res.status(404).json({ error: '账号不存在' });
+  if (!guard.check(req, res, 'system.user.edit', target)) return;
+  // This is an initial grant, not a general role-editor. Limiting it to
+  // pending accounts keeps existing accounts immutable through this new route.
+  if (rbac.normalizeRole(target.role) !== 'pending_authorization') return res.status(409).json({ error: '仅可为待授权账号首次授予角色' });
+  const stores = readAll('stores') || [], regions = readAll('regions') || [];
+  const store = target.storeId ? stores.find(x => x.id === target.storeId && x.active !== false) : null;
+  const region = target.regionId ? regions.find(x => x.id === target.regionId && x.active !== false) : null;
+  const storeRoles = new Set(['manager', 'sales', 'warehouse', 'service']);
+  if (storeRoles.has(role) && !store) return res.status(400).json({ error: '该角色必须先绑定有效门店' });
+  if (role === 'regional_manager' && !region) return res.status(400).json({ error: '区域经理必须先绑定有效区域' });
+  if (store && region && store.regionId && store.regionId !== region.id) return res.status(400).json({ error: '账号门店与区域绑定不匹配' });
+  if (role === 'manager' && store?.managerId) return res.status(409).json({ error: '该门店已有店长账号，请先在门店管理中更换或解绑' });
+  const PH_ROLES = new Set(['philippines_manager', 'regional_manager', 'manager', 'sales', 'warehouse', 'service']);
+  if (PH_ROLES.has(role)) target.country = region?.countryCode || (store?.regionId ? regions.find(x => x.id === store.regionId)?.countryCode : null) || 'PH';
+  target.role = role; target.updatedAt = nowIso();
+  if (role === 'manager' && store) { store.managerId = target.id; store.managerName = target.name; writeAll('stores', stores); }
+  writeAll('users', users);
+  recordControlAudit(req, actor, 'user.role.grant', 'user', target.id, { previousRole: 'pending_authorization', role, storeId: target.storeId, regionId: target.regionId });
+  const { password: _password, ...safe } = target; res.json({ item: safe });
 });
 app.post('/api/v2/organizations', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
@@ -1684,6 +1753,15 @@ app.get('/api/v2/workflows/definitions', (req, res) => {
   if (!guard.checkPerm(req, res, 'workflow.configure')) return;
   res.json({ items: (readAll('workflowDefinitions') || []).filter(x => x.active !== false && controlCenter.WORKFLOW_TYPES[x.type]) });
 });
+app.get('/api/v2/workflows/approver-candidates', (req, res) => {
+  if (!guard.checkPerm(req, res, 'workflow.configure')) return;
+  const users = readAll('users') || [], departments = readAll('departments') || [];
+  const items = (readAll('employees') || []).filter(employee => employee.active !== false).map(employee => {
+    const identity = workflowApproverIdentity(employee.id, users);
+    return { employeeId: employee.id, name: employee.name, departmentName: departments.find(x => x.id === employee.departmentId)?.name || '', accountId: identity.user?.id || null, username: identity.user?.username || null, selectable: !identity.reason, reason: identity.reason };
+  });
+  res.json({ items });
+});
 app.get('/api/v2/workflows/:id/delegates', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const item = (readAll('workflowInstances') || []).find(x => x.id === req.params.id);
@@ -1712,10 +1790,12 @@ function normalizeSimpleWorkflowDefinition(type, raw, activeUsers) {
   if (steps.length !== 1) return { error: '每个流程只能配置一名具体审批人' };
   const approvers = Array.isArray(steps[0]?.approvers) ? steps[0].approvers : [];
   if (approvers.length !== 1 || approvers[0]?.kind !== 'user') return { error: '每个流程只能选择一名具体审批人' };
-  const userId = controlCenter.cleanText(approvers[0].id, 100);
-  const user = activeUsers.find(x => x.id === userId && !x.disabled);
-  if (!user) return { error: '审批用户不存在或已停用' };
-  if (!rbac.hasPermission(user, 'workflow.approve') || !rbac.hasPermission(user, 'workflow.view')) return { error: '指定审批账号缺少流程查看或审批权限' };
+  const employeeId = controlCenter.cleanText(approvers[0].employeeId, 100);
+  if (!employeeId) return { error: '请选择员工档案，而不是直接提交账号' };
+  const identity = workflowApproverIdentity(employeeId, activeUsers);
+  if (identity.reason) return { error: `指定人员不可选：${identity.reason}` };
+  const user = identity.user;
+  const userId = user.id;
   return { value: [{ label: `${controlCenter.WORKFLOW_TYPES[type].label}审批`, mode: 'any', approvers: [{ kind: 'user', id: userId }] }] };
 }
 function saveWorkflowDefinitions(definitions, now) {
@@ -1741,10 +1821,10 @@ app.put('/api/v2/workflows/definitions', (req, res) => {
     if (existing) {
       existing.name = controlCenter.WORKFLOW_TYPES[type].label;
       existing.version = Number(existing.version || 0) + 1;
-      existing.config = { steps: normalized[type], slaHours: existing.config?.slaHours ?? null };
+      existing.config = { steps: normalized[type], slaHours: existing.config?.slaHours ?? null, assignedApproverAccess: true };
       existing.updatedAt = now; items.push(existing);
     } else {
-      const item = { id: nanoid(), type, name: controlCenter.WORKFLOW_TYPES[type].label, version: 1, active: true, config: { steps: normalized[type], slaHours: null }, createdAt: now, updatedAt: now };
+      const item = { id: nanoid(), type, name: controlCenter.WORKFLOW_TYPES[type].label, version: 1, active: true, config: { steps: normalized[type], slaHours: null, assignedApproverAccess: true }, createdAt: now, updatedAt: now };
       defs.push(item); items.push(item);
     }
   }
@@ -1765,22 +1845,25 @@ app.put('/api/v2/workflows/definitions/:type', (req, res) => {
   if (slaHours !== null && (!Number.isInteger(slaHours) || slaHours < 1 || slaHours > 720)) return res.status(400).json({ error: '审批时限须为 1 至 720 小时；留空表示不设时限' });
   const defs = readAll('workflowDefinitions') || [], existing = defs.find(x => x.type === type);
   const now = nowIso();
-  if (existing) { existing.name = controlCenter.WORKFLOW_TYPES[type].label; existing.version = Number(existing.version || 0) + 1; existing.config = { steps: normalized, slaHours: Object.hasOwn(b, 'slaHours') ? slaHours : (existing.config?.slaHours ?? null) }; existing.updatedAt = now; }
-  else defs.push({ id: nanoid(), type, name: controlCenter.WORKFLOW_TYPES[type].label, version: 1, active: true, config: { steps: normalized, slaHours }, createdAt: now, updatedAt: now });
+  if (existing) { existing.name = controlCenter.WORKFLOW_TYPES[type].label; existing.version = Number(existing.version || 0) + 1; existing.config = { steps: normalized, slaHours: Object.hasOwn(b, 'slaHours') ? slaHours : (existing.config?.slaHours ?? null), assignedApproverAccess: true }; existing.updatedAt = now; }
+  else defs.push({ id: nanoid(), type, name: controlCenter.WORKFLOW_TYPES[type].label, version: 1, active: true, config: { steps: normalized, slaHours, assignedApproverAccess: true }, createdAt: now, updatedAt: now });
   writeAll('workflowDefinitions', defs); recordControlAudit(req, u, 'workflow.definition.update', 'workflowDefinition', existing?.id || defs[defs.length - 1].id, { type, version: existing?.version || 1 });
   res.json({ item: existing || defs[defs.length - 1] });
 });
 app.get('/api/v2/workflows', (req, res) => {
-  if (!guard.checkPerm(req, res, 'workflow.view')) return;
-  const u = getSessionUser(req), status = String(req.query.status || ''), type = String(req.query.type || ''), query = controlCenter.cleanText(req.query.q, 160).toLocaleLowerCase();
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  // Pending/disabled accounts must never gain the narrow exception. Other
+  // named users may receive only their current frozen assignment below.
+  if (u.disabled || rbac.normalizeRole(u.role) === 'pending_authorization') return res.status(403).json({ error: '无权限访问流程' });
+  const status = String(req.query.status || ''), type = String(req.query.type || ''), query = controlCenter.cleanText(req.query.q, 160).toLocaleLowerCase();
   const counts = {}, countsByType = {};
-  const visible = (readAll('workflowInstances') || []).filter(x => controlVisible(req, 'workflow.view', x));
+  const visible = (readAll('workflowInstances') || []).filter(x => canReadAssignedWorkflow(req, x, u));
   visible.forEach(x => {
     counts[x.status] = (counts[x.status] || 0) + 1;
     countsByType[x.type] = countsByType[x.type] || {};
     countsByType[x.type][x.status] = (countsByType[x.type][x.status] || 0) + 1;
   });
-  const actionableIds = new Set(visible.filter(x => x.status === 'pending_approval' && x.createdBy !== u.id && controlCenter.WORKFLOW_TYPES[x.type] && controlVisible(req, 'workflow.approve', x) && approvalSlotForActor(x, u)).map(x => x.id));
+  const actionableIds = new Set(visible.filter(x => x.status === 'pending_approval' && x.createdBy !== u.id && controlCenter.WORKFLOW_TYPES[x.type] && canDecideAssignedWorkflow(req, x, u) && approvalSlotForActor(x, u)).map(x => x.id));
   const pendingForMe = actionableIds.size;
   let items = visible;
   if (status) items = items.filter(x => x.status === status);
@@ -1792,7 +1875,7 @@ app.get('/api/v2/workflows', (req, res) => {
   const total = items.length, limit = Math.max(1, Math.min(50, parseInt(req.query.limit, 10) || 25));
   const rawOffset = Math.max(0, parseInt(req.query.offset, 10) || 0);
   const offset = total ? Math.min(rawOffset, Math.floor((total - 1) / limit) * limit) : 0;
-  res.json({ items: items.slice(offset, offset + limit).map(x => ({ ...x, actionableForMe: actionableIds.has(x.id) })), total, offset, limit, counts, countsByType, pendingForMe });
+  res.json({ items: items.slice(offset, offset + limit).map(x => ({ ...x, actionableForMe: actionableIds.has(x.id), assignedApproverForMe: explicitWorkflowAccess(x, u) })), total, offset, limit, counts, countsByType, pendingForMe });
 });
 app.get('/api/v2/workflow-stores', (req, res) => {
   if (!guard.checkPerm(req, res, 'workflow.create')) return;
@@ -1860,6 +1943,17 @@ app.post('/api/v2/workflows', (req, res) => {
   item.approvalSlaHours = Number.isInteger(def?.config?.slaHours) ? def.config.slaHours : null;
   item.approvalDueAt = nextApprovalDueAt(item.approvalSlaHours, new Date(item.createdAt).getTime());
   item.approvalSteps = def?.config?.steps?.length ? JSON.parse(JSON.stringify(def.config.steps)) : [{ label: 'Management approval', mode: 'any', approvers: [{ kind: 'role', id: 'admin' }, { kind: 'role', id: 'owner' }, { kind: 'role', id: 'philippines_manager' }] }];
+  if (def?.config?.assignedApproverAccess === true) {
+    const currentUsers = readAll('users') || [], currentEmployees = readAll('employees') || [];
+    const identities = item.approvalSteps.map(step => (step.approvers || []).filter(a => a.kind === 'user').map(a => {
+      const employee = currentEmployees.find(x => workflowApproverIdentity(x.id, currentUsers, currentEmployees).user?.id === a.id);
+      return employee ? { employeeId: employee.id, userId: a.id } : null;
+    }).filter(Boolean));
+    if (identities.some((step, index) => step.length !== (item.approvalSteps[index].approvers || []).filter(a => a.kind === 'user').length)) return res.status(409).json({ error: '审批人账号未关联唯一在职员工档案；请修正审批设置后重新提交' });
+    const targetUsers = identities.flat().map(x => currentUsers.find(user => user.id === x.userId));
+    if (targetUsers.some(target => !target?.country || target.country !== wfCountry)) return res.status(409).json({ error: '审批人国家归属未知或与申请不一致。为避免生成无法审批的申请，请选择与申请同国家且国家信息完整的人员。' });
+    item.assignedApproverAccess = { version: 2, steps: identities };
+  }
   item.stepApprovals = [];
   if (sourceInspection) {
     const sourceAttachments = Array.isArray(sourceInspection.attachments) ? sourceInspection.attachments : [];
@@ -1977,7 +2071,7 @@ app.post('/api/v2/workflows/:id/actions', (req, res) => {
     return res.json({ item, comment });
   }
   if (action === 'approve' || action === 'reject' || action === 'return') {
-    if (!guard.check(req, res, 'workflow.approve', item)) return;
+    if (!canDecideAssignedWorkflow(req, item, u)) return res.status(403).json({ error: '无权限执行此操作' });
     if (item.createdBy === u.id) return res.status(403).json({ error: '申请人不能审批自己的申请' });
     {
       const step = (item.approvalSteps || [])[item.currentStep] || {};
@@ -2223,12 +2317,15 @@ app.get('/api/v2/workflows/:id/attachments/:attachmentId/download', (req, res) =
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const item = (readAll('workflowInstances') || []).find(x => x.id === req.params.id);
   if (!item) return res.status(404).json({ error: '申请不存在' });
-  if (!guard.checkPerm(req, res, 'workflow.view')) return;
-  if (!controlVisible(req, 'workflow.view', item)) return res.status(403).json({ error: '无权限查看此流程附件' });
+  const narrowAssignedAccess = explicitWorkflowAccess(item, u);
+  if (!canReadAssignedWorkflow(req, item, u)) return res.status(403).json({ error: '无权限查看此流程附件' });
   const attachment = (item.attachments || []).find(x => x.id === req.params.attachmentId);
   if (!attachment || !/^[A-Za-z0-9_-]+\.(pdf|png|jpg|csv|xlsx|xls|xlsm|xlsb)$/.test(attachment.storedName || '')) return res.status(404).json({ error: '附件不存在' });
   const filePath = path.join(workflowAttachmentDir, attachment.storedName);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: '附件文件不存在' });
+  // The narrow assignment grants image evidence preview only. Normal RBAC
+  // readers retain their existing download behavior for every permitted type.
+  if (narrowAssignedAccess && (req.query?.disposition !== 'inline' || !['image/png', 'image/jpeg'].includes(attachment.mimeType))) return res.status(403).json({ error: '指定审批人只能预览本申请的图片凭证' });
   const asciiName = attachment.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
   const inlinePreview = req.query?.disposition === 'inline' && ['image/png', 'image/jpeg'].includes(attachment.mimeType);
   res.set({ 'Content-Type': workflowAttachmentTypes[attachment.mimeType]?.ext ? attachment.mimeType : 'application/octet-stream', 'Content-Disposition': `${inlinePreview ? 'inline' : 'attachment'}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(attachment.name)}`, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });

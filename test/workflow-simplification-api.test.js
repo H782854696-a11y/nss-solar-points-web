@@ -10,10 +10,10 @@ test('simplified approvals, store catalogue, regions, announcements and shipment
   const {request,login,dataDir} = app, admin = await login('admin');
   const stores = (await request('GET','/api/stores',null,admin)).data.items;
   const storeId = stores[0].id, otherStoreId = stores[1].id;
-  const account = await request('POST','/api/v2/users',{username:'scope_manager',name:'Scope Manager',role:'manager',storeId,password:app.password},admin);
+  const account = await app.createPendingThenGrant(admin, {username:'scope_manager',name:'Scope Manager',role:'manager',storeId,password:app.password});
   assert.equal(account.status,201,JSON.stringify(account.data));
   const manager = await login('scope_manager');
-  const reviewerResult = await request('POST','/api/v2/users',{username:'ph_reviewer',name:'PH Reviewer',role:'philippines_manager',password:app.password},admin);
+  const reviewerResult = await app.createPendingThenGrant(admin, {username:'ph_reviewer',name:'PH Reviewer',role:'philippines_manager',password:app.password});
   assert.equal(reviewerResult.status,201,JSON.stringify(reviewerResult.data));
   const reviewer = await login('ph_reviewer');
   const create = (type, form, images, cookie=admin) => request('POST','/api/v2/workflows',{type,form,...(images === undefined ? {} : {images})},cookie);

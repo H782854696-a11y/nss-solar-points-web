@@ -75,10 +75,14 @@ test('purchaser role, shipping stage machine and stock are correctly scoped', { 
   const storeId = stores.data.items?.[0]?.id || null;
 
   // ── 建立采购员与店长两个账号，验证权限隔离 ──
-  const purchaser = await raw('POST', '/api/v2/users', { username: 'buyer1', password: purchaserPassword, name: '采购员', role: 'purchaser' }, admin);
-  assert.equal(purchaser.status, 201, JSON.stringify(purchaser.data));
-  const storeManager = await raw('POST', '/api/v2/users', { username: 'smgr_p', password: storeManagerPassword, name: '店长', role: 'manager', storeId }, admin);
-  assert.equal(storeManager.status, 201, JSON.stringify(storeManager.data));
+  const pendingPurchaser = await raw('POST', '/api/v2/users', { username: 'buyer1', password: purchaserPassword, name: '采购员' }, admin);
+  assert.equal(pendingPurchaser.status, 201, JSON.stringify(pendingPurchaser.data));
+  const purchaser = await raw('PUT', `/api/v2/users/${pendingPurchaser.data.item.id}/role`, { role: 'purchaser' }, admin);
+  assert.equal(purchaser.status, 200, JSON.stringify(purchaser.data));
+  const pendingStoreManager = await raw('POST', '/api/v2/users', { username: 'smgr_p', password: storeManagerPassword, name: '店长', storeId }, admin);
+  assert.equal(pendingStoreManager.status, 201, JSON.stringify(pendingStoreManager.data));
+  const storeManager = await raw('PUT', `/api/v2/users/${pendingStoreManager.data.item.id}/role`, { role: 'manager' }, admin);
+  assert.equal(storeManager.status, 200, JSON.stringify(storeManager.data));
 
   async function loginAndRotate(username, password, next) {
     const first = await raw('POST', '/api/auth/login', { username, password });
