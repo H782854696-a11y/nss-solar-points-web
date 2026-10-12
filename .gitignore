@@ -1,5 +1,6 @@
 # Dependencies and generated build/test output
 node_modules/
+.tools/
 .cache/
 coverage/
 dist/

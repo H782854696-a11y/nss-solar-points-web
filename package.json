@@ -3,9 +3,14 @@
   "version": "1.0.0",
   "description": "NSS Solar 中控平台 V2：管理流程、任务、门店跟进与公告",
   "main": "server.js",
+  "engines": {
+    "node": ">=22.5.0 <25",
+    "npm": ">=10.9.8 <11"
+  },
+  "packageManager": "npm@10.9.8",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js",
+    "dev": "node scripts/dev-local.cjs",
     "test": "node --test --test-concurrency=1 test/*.test.js"
   },
   "dependencies": {

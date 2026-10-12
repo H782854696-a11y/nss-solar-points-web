@@ -28,7 +28,7 @@ process.env.SP_DATA_DIR = SANDBOX;
 
 const APP = path.join(__dirname, '..');
 const store = require(APP + '/lib/store');
-const bcrypt = require(APP + '/node_modules/bcryptjs');
+const bcrypt = require('bcryptjs');
 
 let pass = 0, fail = 0; const fails = [];
 function ok(name, cond, extra) {

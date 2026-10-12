@@ -102,7 +102,7 @@
     'nav.groupDailyOps': ['OPERATIONS', '业务协同'],
     'nav.groupSupply': ['SUPPLY CHAIN', '供应链'],
     'nav.groupCommunications': ['COMPANY ANNOUNCEMENTS', '公司公告'],
-    'nav.organization': ['Organization', '组织架构'],
+    'nav.organization': ['Departments & people', '部门人员'],
     'nav.groupSystemAudit': ['SYSTEM & AUDIT', '系统与审计'],
     'nav.workspaceApprovals': ['Approval Center', '审批中心'],
     'nav.workspaceTasks': ['Tasks & Collab', '任务协作'],

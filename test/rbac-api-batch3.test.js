@@ -17,7 +17,7 @@ process.env.SP_DATA_DIR = SANDBOX;
 const APP = path.join(__dirname, '..');
 const store = require(APP + '/lib/store');
 const rbac = require(APP + '/lib/rbac');
-const bcrypt = require(APP + '/node_modules/bcryptjs');
+const bcrypt = require('bcryptjs');
 
 // ── 测试专用「区域范围」探针角色 ──────────────────────────────
 // 2026-09-22 组织架构调整后，生产矩阵里已不再有任何角色使用 region 范围

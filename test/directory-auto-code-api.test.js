@@ -20,4 +20,12 @@ test('employee and region codes are generated once while explicit legacy codes r
   const regionCodes = regions.map(result => result.data.item.code);
   assert.equal(new Set(regionCodes.map(code => code.toLowerCase())).size, regionCodes.length);
   assert.ok(regionCodes.every(code => /^REG-[A-Z0-9_-]+$/.test(code)));
+  const department = await app.request('POST', '/api/v2/departments', { name: 'China Operations', countryCode: 'CN', code: 'ignored-by-server' }, admin);
+  assert.equal(department.status, 201);
+  assert.match(department.data.item.code, /^DEPT-[A-Z0-9_-]+$/);
+  assert.equal(department.data.item.countryCode, 'CN');
+  assert.equal(department.data.item.organizationId, null);
+  const updatedDepartment = await app.request('PUT', `/api/v2/departments/${department.data.item.id}`, { countryCode: 'PH' }, admin);
+  assert.equal(updatedDepartment.status, 200);
+  assert.equal(updatedDepartment.data.item.countryCode, 'PH');
 });

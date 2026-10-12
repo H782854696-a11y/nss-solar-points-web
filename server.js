@@ -332,9 +332,11 @@ function workspaceLayoutFor(user) {
   const all = readAll('workspaceLayouts') || [];
   const employee = user?.employeeId ? (readAll('employees') || []).find(x => x.id === user.employeeId && x.active !== false) : null;
   const position = employee?.positionId || null;
+  const department = employee?.departmentId || (position ? (readAll('positions') || []).find(x => x.id === position)?.departmentId : null) || null;
   const positionLayout = position ? all.find(x => x.kind === 'position' && x.positionId === position) : null;
+  const departmentLayout = department ? all.find(x => x.kind === 'department' && x.departmentId === department) : null;
   const personalLayout = user ? all.find(x => x.kind === 'user' && x.userId === user.id) : null;
-  return { positionId: position, positionSettings: positionLayout ? cleanWorkspaceSettings(positionLayout.settings) : null, personalSettings: personalLayout ? cleanWorkspaceSettings(personalLayout.settings) : null, effectiveSettings: cleanWorkspaceSettings(personalLayout?.settings || positionLayout?.settings), hasPersonalOverride: !!personalLayout };
+  return { departmentId: department, departmentSettings: departmentLayout ? cleanWorkspaceSettings(departmentLayout.settings) : null, legacyPositionId: position, legacyPositionSettings: positionLayout ? cleanWorkspaceSettings(positionLayout.settings) : null, personalSettings: personalLayout ? cleanWorkspaceSettings(personalLayout.settings) : null, effectiveSettings: cleanWorkspaceSettings(personalLayout?.settings || departmentLayout?.settings || positionLayout?.settings), hasPersonalOverride: !!personalLayout };
 }
 app.get('/api/v2/workspace-settings/me', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
@@ -346,7 +348,7 @@ app.put('/api/v2/workspace-settings/me', (req, res) => {
   const all = readAll('workspaceLayouts') || [], now = nowIso();
   let item = all.find(x => x.kind === 'user' && x.userId === u.id);
   if (item) { item.settings = settings; item.updatedAt = now; item.updatedBy = u.id; }
-  else { item = { id: nanoid(), kind: 'user', userId: u.id, positionId: null, settings, createdAt: now, updatedAt: now, updatedBy: u.id }; all.push(item); }
+  else { item = { id: nanoid(), kind: 'user', userId: u.id, positionId: null, departmentId: null, settings, createdAt: now, updatedAt: now, updatedBy: u.id }; all.push(item); }
   writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.personal.update', 'workspaceLayout', item.id, {});
   res.json(workspaceLayoutFor(u));
 });
@@ -362,7 +364,27 @@ app.get('/api/v2/workspace-settings/positions', (req, res) => {
   const layouts = readAll('workspaceLayouts') || [];
   res.json({ items: (readAll('positions') || []).filter(x => x.active !== false).map(position => ({ position, settings: cleanWorkspaceSettings(layouts.find(x => x.kind === 'position' && x.positionId === position.id)?.settings) })) });
 });
+app.get('/api/v2/workspace-settings/departments', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.user.edit')) return;
+  const layouts = readAll('workspaceLayouts') || [];
+  res.json({ items: (readAll('departments') || []).filter(x => x.active !== false).map(department => ({ department, settings: cleanWorkspaceSettings(layouts.find(x => x.kind === 'department' && x.departmentId === department.id)?.settings) })) });
+});
+app.put('/api/v2/workspace-settings/departments/:departmentId', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.user.edit')) return;
+  const department = (readAll('departments') || []).find(x => x.id === req.params.departmentId && x.active !== false);
+  if (!department) return res.status(404).json({ error: '部门不存在或已停用' });
+  const settings = cleanWorkspaceSettings((req.body || {}).settings), all = readAll('workspaceLayouts') || [], now = nowIso();
+  let item = all.find(x => x.kind === 'department' && x.departmentId === department.id);
+  if (item) { item.settings = settings; item.updatedAt = now; item.updatedBy = u.id; }
+  else { item = { id: nanoid(), kind: 'department', userId: null, positionId: null, departmentId: department.id, settings, createdAt: now, updatedAt: now, updatedBy: u.id }; all.push(item); }
+  writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.department.update', 'workspaceLayout', item.id, { departmentId: department.id });
+  res.json({ department, settings });
+});
 app.put('/api/v2/workspace-settings/positions/:positionId', (req, res) => {
+  return res.status(410).json({ error: '职位工作台默认设置已停用；请使用部门默认设置' });
+  /* legacy implementation retained below for historical source context
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'system.user.edit')) return;
   const position = (readAll('positions') || []).find(x => x.id === req.params.positionId && x.active !== false);
@@ -373,6 +395,7 @@ app.put('/api/v2/workspace-settings/positions/:positionId', (req, res) => {
   else { item = { id: nanoid(), kind: 'position', userId: null, positionId: position.id, settings, createdAt: now, updatedAt: now, updatedBy: u.id }; all.push(item); }
   writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.position.update', 'workspaceLayout', item.id, { positionId: position.id });
   res.json({ position, settings });
+  */
 });
 app.get('/api/v2/workspace-settings/users/:userId', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
@@ -391,7 +414,7 @@ app.put('/api/v2/workspace-settings/users/:userId', (req, res) => {
   const settings = cleanWorkspaceSettings((req.body || {}).settings), all = readAll('workspaceLayouts') || [], now = nowIso();
   let item = all.find(x => x.kind === 'user' && x.userId === target.id);
   if (item) { item.settings = settings; item.updatedAt = now; item.updatedBy = u.id; }
-  else { item = { id: nanoid(), kind: 'user', userId: target.id, positionId: null, settings, createdAt: now, updatedAt: now, updatedBy: u.id }; all.push(item); }
+  else { item = { id: nanoid(), kind: 'user', userId: target.id, positionId: null, departmentId: null, settings, createdAt: now, updatedAt: now, updatedBy: u.id }; all.push(item); }
   writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.user.update', 'workspaceLayout', item.id, { userId: target.id });
   res.json(workspaceLayoutFor(target));
 });
@@ -1536,11 +1559,16 @@ for (const directory of [
   app.post(`/api/v2/${directory.path}`, (req, res) => {
     const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
     if (!guard.checkPerm(req, res, 'org.manage')) return;
-    const b = req.body || {}, code = controlCenter.cleanText(b.code, 40).toUpperCase(), name = controlCenter.cleanText(b.name, 120);
-    if (!code || !name) return res.status(400).json({ error: `${directory.name}编码和名称不能为空` });
+    const b = req.body || {}, name = controlCenter.cleanText(b.name, 120);
+    if (!name) return res.status(400).json({ error: `${directory.name}名称不能为空` });
     const items = readAll(directory.collection) || [];
+    const code = directory.collection === 'departments' ? nextGeneratedCode(items, 'DEPT') : controlCenter.cleanText(b.code, 40).toUpperCase();
+    if (!code) return res.status(400).json({ error: `${directory.name}编码不能为空` });
+    const departmentCountry = directory.collection === 'departments' ? controlCenter.cleanText(b.countryCode || 'PH', 2).toUpperCase() : null;
+    if (directory.collection === 'departments' && !['CN', 'PH'].includes(departmentCountry)) return res.status(400).json({ error: '部门国家仅支持 CN 或 PH' });
+    if (directory.collection === 'departments' && !controlVisible(req, 'org.manage', { country: departmentCountry })) return res.status(403).json({ error: '无权限管理该国家的部门' });
     if (items.some(x => x.code.toLowerCase() === code.toLowerCase())) return res.status(409).json({ error: `${directory.name}编码已存在` });
-    const now = nowIso(), item = { id: nanoid(), code, name, organizationId: b.organizationId || null, parentId: b.parentId || null, departmentId: b.departmentId || null, active: true, createdAt: now, updatedAt: now };
+    const now = nowIso(), item = { id: nanoid(), code, name, organizationId: directory.collection === 'departments' ? null : (b.organizationId || null), parentId: b.parentId || null, departmentId: b.departmentId || null, countryCode: directory.collection === 'departments' ? departmentCountry : undefined, active: true, createdAt: now, updatedAt: now };
     items.push(item); writeAll(directory.collection, items); recordControlAudit(req, u, `${directory.path}.create`, directory.path, item.id, { code, name }); res.status(201).json({ item });
   });
   app.put(`/api/v2/${directory.path}/:id`, (req, res) => {
@@ -1557,7 +1585,12 @@ for (const directory of [
         : (readAll('employees') || []).some(x => x.positionId === item.id && x.active !== false) || (readAll('workflowDefinitions') || []).some(x => (x.config?.steps || []).some(step => (step.approvers || []).some(a => a.kind === 'position' && a.id === item.id)));
       if (inUse) return res.status(409).json({ error: `${directory.name}仍被启用的员工、下级档案或审批规则引用，不能停用` });
     }
-    Object.assign(item, { code, name, ...(b.organizationId !== undefined ? { organizationId: b.organizationId || null } : {}), ...(b.parentId !== undefined ? { parentId: b.parentId || null } : {}), ...(b.departmentId !== undefined ? { departmentId: b.departmentId || null } : {}), ...(b.active !== undefined ? { active: !!b.active } : {}), updatedAt: nowIso() });
+    const countryCode = directory.collection === 'departments' && b.countryCode !== undefined
+      ? controlCenter.cleanText(b.countryCode, 2).toUpperCase()
+      : item.countryCode;
+    if (directory.collection === 'departments' && !['CN', 'PH'].includes(countryCode)) return res.status(400).json({ error: '部门国家仅支持 CN 或 PH' });
+    if (directory.collection === 'departments' && !controlVisible(req, 'org.manage', { country: countryCode })) return res.status(403).json({ error: '无权限管理该国家的部门' });
+    Object.assign(item, { code, name, ...(b.organizationId !== undefined ? { organizationId: b.organizationId || null } : {}), ...(b.parentId !== undefined ? { parentId: b.parentId || null } : {}), ...(b.departmentId !== undefined ? { departmentId: b.departmentId || null } : {}), ...(directory.collection === 'departments' ? { countryCode } : {}), ...(b.active !== undefined ? { active: !!b.active } : {}), updatedAt: nowIso() });
     writeAll(directory.collection, items); recordControlAudit(req, u, `${directory.path}.update`, directory.path, item.id, { active: item.active }); res.json({ item });
   });
 }
@@ -1587,15 +1620,9 @@ app.post('/api/v2/employees', (req, res) => {
   if (items.some(x => x.employeeCode.toLowerCase() === employeeCode.toLowerCase())) return res.status(409).json({ error: '员工编号已存在' });
   const department = b.departmentId ? (readAll('departments') || []).find(x => x.id === b.departmentId && x.active !== false) : null;
   if (b.departmentId && !department) return res.status(400).json({ error: '所选部门不存在或已停用' });
-  const position = b.positionId ? (readAll('positions') || []).find(x => x.id === b.positionId && x.active !== false) : null;
-  if (b.positionId && !position) return res.status(400).json({ error: '所选职位不存在或已停用' });
-  if (position?.departmentId && department && position.departmentId !== department.id) return res.status(400).json({ error: '所选职位不属于该部门' });
-  const departmentId = department?.id || position?.departmentId || null;
-  const resolvedDepartment = departmentId ? (readAll('departments') || []).find(x => x.id === departmentId) : null;
-  const organizationId = resolvedDepartment?.organizationId || b.organizationId || null;
-  if (b.organizationId && resolvedDepartment?.organizationId && b.organizationId !== resolvedDepartment.organizationId) return res.status(400).json({ error: '所选部门不属于该组织' });
+  const departmentId = department?.id || null;
   const linkedStore = storeId ? (readAll('stores') || []).find(x => x.id === storeId) : null;
-  const now = nowIso(), item = { id: nanoid(), employeeCode, name, email: controlCenter.cleanText(b.email, 180), phone: controlCenter.cleanText(b.phone, 80), organizationId, departmentId, positionId: position?.id || null, storeId, warehouseId: null, regionId: linkedStore?.regionId || null, userId: b.userId || null, active: true, createdAt: now, updatedAt: now };
+  const now = nowIso(), item = { id: nanoid(), employeeCode, name, email: controlCenter.cleanText(b.email, 180), phone: '', organizationId: null, departmentId, positionId: null, storeId, warehouseId: null, regionId: linkedStore?.regionId || null, userId: b.userId || null, active: true, createdAt: now, updatedAt: now };
   items.push(item); writeAll('employees', items); recordControlAudit(req, u, 'employee.create', 'employee', item.id, { employeeCode, name });
   res.status(201).json({ item });
 });
@@ -1610,9 +1637,8 @@ app.put('/api/v2/employees/:id', (req, res) => {
   const nextStore = nextStoreId ? (readAll('stores') || []).find(x => x.id === nextStoreId) : null;
   if (nextStoreId && !nextStore) return res.status(400).json({ error: '门店不存在' });
   const nextRegionId = nextStore?.regionId || null;
-  if (b.positionId && !(readAll('positions') || []).some(x => x.id === b.positionId && x.active !== false)) return res.status(400).json({ error: '所选职位不存在或已停用' });
   if (!guard.check(req, res, 'staff.edit', { ...item, storeId: nextStoreId, regionId: nextRegionId })) return;
-  for (const k of ['name','email','phone','departmentId','positionId','userId']) if (b[k] !== undefined) item[k] = controlCenter.cleanText(b[k], k === 'name' ? 120 : 180) || null;
+  for (const k of ['name','email','departmentId','userId']) if (b[k] !== undefined) item[k] = controlCenter.cleanText(b[k], k === 'name' ? 120 : 180) || null;
   if (b.userId) {
     const user = (readAll('users') || []).find(x => x.id === b.userId && !x.disabled);
     if (!user || (user.employeeId && user.employeeId !== item.id)) return res.status(400).json({ error: '所选账号不存在、已停用或已关联其他员工' });
