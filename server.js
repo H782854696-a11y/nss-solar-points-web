@@ -1479,6 +1479,11 @@ app.get('/api/v2/employees', (req, res) => {
   const items = (readAll('employees') || []).filter(x => x.active !== false && controlVisible(req, 'staff.view', x));
   res.json({ items });
 });
+app.get('/api/v2/employees/archived', (req, res) => {
+  if (!guard.checkPerm(req, res, 'staff.edit')) return;
+  const items = (readAll('employees') || []).filter(x => x.active === false && controlVisible(req, 'staff.edit', x));
+  res.json({ items });
+});
 app.post('/api/v2/employees', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'staff.create')) return;
@@ -1527,6 +1532,31 @@ app.put('/api/v2/employees/:id', (req, res) => {
   item.storeId = nextStoreId; item.regionId = nextRegionId;
   if (b.active !== undefined) item.active = !!b.active;
   item.updatedAt = nowIso(); writeAll('employees', items); recordControlAudit(req, u, 'employee.update', 'employee', item.id);
+  res.json({ item });
+});
+app.post('/api/v2/employees/:id/archive', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const items = readAll('employees') || [], item = items.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '员工档案不存在' });
+  if (!guard.check(req, res, 'staff.edit', item)) return;
+  if (item.active === false) return res.status(409).json({ error: '该员工档案已被移除，可在已移除员工中恢复' });
+  if (u.employeeId === item.id) return res.status(400).json({ error: '不能移除当前登录用户关联的员工档案' });
+  const linkedUser = item.userId ? (readAll('users') || []).find(x => x.id === item.userId) : null;
+  if (linkedUser && !linkedUser.disabled) return res.status(409).json({ error: '该员工仍关联启用账号；为避免暗中更改账号权限，不能移除' });
+  const pendingApproval = (readAll('workflowInstances') || []).some(x => x.status === 'pending_approval' && x.assigneeId && x.assigneeId === item.userId);
+  if (pendingApproval) return res.status(409).json({ error: '该员工关联账号仍有待处理审批，不能移除' });
+  item.active = false; item.archivedAt = nowIso(); item.archivedBy = u.id; item.updatedAt = item.archivedAt;
+  writeAll('employees', items); recordControlAudit(req, u, 'employee.archive', 'employee', item.id, { employeeCode: item.employeeCode, name: item.name });
+  res.json({ item });
+});
+app.post('/api/v2/employees/:id/restore', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const items = readAll('employees') || [], item = items.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '员工档案不存在' });
+  if (!guard.check(req, res, 'staff.edit', item)) return;
+  if (item.active !== false) return res.status(409).json({ error: '该员工档案当前已启用' });
+  item.active = true; item.archivedAt = null; item.archivedBy = null; item.updatedAt = nowIso();
+  writeAll('employees', items); recordControlAudit(req, u, 'employee.restore', 'employee', item.id, { employeeCode: item.employeeCode, name: item.name });
   res.json({ item });
 });
 
@@ -2052,7 +2082,8 @@ app.get('/api/v2/workflows/:id/attachments/:attachmentId/download', (req, res) =
   const filePath = path.join(workflowAttachmentDir, attachment.storedName);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: '附件文件不存在' });
   const asciiName = attachment.name.replace(/[^\x20-\x7e]/g, '_').replace(/["\\]/g, '_');
-  res.set({ 'Content-Type': workflowAttachmentTypes[attachment.mimeType]?.ext ? attachment.mimeType : 'application/octet-stream', 'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(attachment.name)}`, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
+  const inlinePreview = req.query?.disposition === 'inline' && ['image/png', 'image/jpeg'].includes(attachment.mimeType);
+  res.set({ 'Content-Type': workflowAttachmentTypes[attachment.mimeType]?.ext ? attachment.mimeType : 'application/octet-stream', 'Content-Disposition': `${inlinePreview ? 'inline' : 'attachment'}; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(attachment.name)}`, 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
   res.sendFile(filePath);
 });
 

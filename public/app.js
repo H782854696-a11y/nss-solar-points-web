@@ -984,7 +984,7 @@ async function renderControlCenter(root) {
   const purchaseQuery = new URLSearchParams({ limit: '20', offset: String(state.purchaseOffset || 0) });
   if (state.purchaseFilters?.q) purchaseQuery.set('q', state.purchaseFilters.q);
   if (state.purchaseFilters?.stage) purchaseQuery.set('stage', state.purchaseFilters.stage);
-  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, auditData, operationData, accountData, announcementData, recentWorkflowData, recentActionableWorkflowData, recentTaskData, recentMyTaskData, purchaseData, regionData, workflowStoreData] = await Promise.all([
+  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, auditData, operationData, accountData, announcementData, recentWorkflowData, recentActionableWorkflowData, recentTaskData, recentMyTaskData, purchaseData, regionData, workflowStoreData, archivedEmployeeData] = await Promise.all([
     mayViewWorkflows ? GET(`/api/v2/workflows?${workflowQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
     can('workflow.configure') ? GET('/api/v2/workflows/definitions') : Promise.resolve({ items: [] }),
     mayViewTasks ? GET(`/api/v2/tasks?${taskQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
@@ -1008,6 +1008,7 @@ async function renderControlCenter(root) {
     // ⚠️ 必须与解构变量同序追加在末尾（曾因位置错位导致数据取到别的接口）。
     can('org.view') ? GET('/api/v2/regions').catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
     can('workflow.create') ? GET('/api/v2/workflow-stores') : Promise.resolve({ items: [] }),
+    can('staff.edit') ? GET('/api/v2/employees/archived') : Promise.resolve({ items: [] }),
   ]);
   if (mayViewWorkflows) state.workflowOffset = Number(workflowData.offset || 0);
   if (mayViewTasks) state.taskOffset = Number(taskData.offset || 0);
@@ -1020,7 +1021,7 @@ async function renderControlCenter(root) {
   const directoryData = mayViewOrg ? await Promise.all([GET('/api/v2/departments'), GET('/api/v2/positions')]) : [{ items: [] }, { items: [] }];
   if (epoch !== screenEpoch || version !== root.ccRenderVersion || state.me?.id !== userId || state.screen !== 'controlCenter') return;
   const departments = directoryData[0].items || [], positions = directoryData[1].items || [];
-  const employees = employeeData.items || [], notices = noticeData.items || [], stores = storeData.items || [];
+  const employees = employeeData.items || [], archivedEmployees = archivedEmployeeData.items || [], notices = noticeData.items || [], stores = storeData.items || [];
   const approverAccounts = (accountData.items || []).filter(x => !x.disabled);
   const employeeForAccount = account => employees.find(employee => employee.userId === account.id || employee.id === account.employeeId);
   const approverPeople = approverAccounts.filter(account => !account.disabled && ['admin','owner','philippines_manager'].includes(account.role === 'manager' ? 'store_manager' : account.role)).map(account => {
@@ -1252,7 +1253,7 @@ async function renderControlCenter(root) {
       }).join(' · ')}</div>
       ${w.type === 'stocktake' && Array.isArray(w.form?.items) && w.form.items.length ? `<details class="cc-history"><summary>${ccText('Review stocktake lines', '查看盘点明细')} (${w.form.items.length})</summary><div class="cc-stocktake-scroll"><table class="cc-stocktake-table"><thead><tr><th>${ccText('Item code', '商品编码')}</th><th>${ccText('Item name', '商品名称')}</th><th>${ccText('Bin', '库位')}</th><th>${ccText('Book', '账面')}</th><th>${ccText('Counted', '实盘')}</th><th>${ccText('Recount', '复盘')}</th><th>${ccText('Difference', '差异')}</th><th>${ccText('Reason', '原因')}</th><th>${ccText('Remark', '备注')}</th></tr></thead><tbody>${w.form.items.slice(0, 20).map(item => `<tr><td>${escapeHtml(item.itemCode || '')}</td><td>${escapeHtml(item.itemName || '')}</td><td>${escapeHtml(item.location || '')}</td><td>${escapeHtml(item.systemQuantity ?? '—')}</td><td>${escapeHtml(item.countedQuantity ?? '—')}</td><td>${escapeHtml(item.recountedQuantity ?? '—')}</td><td>${escapeHtml(stocktakeDifference(item))}</td><td>${escapeHtml(item.varianceReason || '')}</td><td>${escapeHtml(item.remark || '')}</td></tr>`).join('')}</tbody></table></div>${w.form.items.length > 20 ? `<div class="cc-meta">${ccText('First 20 lines are shown; download the full list.', '此处显示前 20 行，可下载完整明细。')}</div>` : ''}<button type="button" class="btn btn-sm" data-stocktake-export="${escapeHtml(w.id)}">${ccText('Download detail CSV', '下载完整盘点明细')}</button></details>` : ''}
       ${(w.comments || []).length ? `<details class="cc-history" open><summary>${ccText('Comments', '协作备注')} (${w.comments.length})</summary>${w.comments.map(c => `<div class="cc-meta"><strong>${escapeHtml(c.actorName || '')}</strong> · ${escapeHtml(new Date(c.createdAt).toLocaleString())}<div>${escapeHtml(c.comment || '')}</div></div>`).join('')}</details>` : ''}
-      ${(w.attachments || []).length ? `<div class="cc-history"><strong>${ccText('Attachments', '凭证附件')}</strong>${w.attachments.map(a => `<div class="cc-meta"><a href="/api/v2/workflows/${encodeURIComponent(w.id)}/attachments/${encodeURIComponent(a.id)}/download">${escapeHtml(a.name)}</a> · ${escapeHtml(({before:'整改前',after:'整改后',supporting:'其他凭证'})[a.evidenceType || 'supporting'] || '')}${a.executionRound ? ` · ${ccText('Round', '第')} ${escapeHtml(a.executionRound)} ${ccText('evidence', '轮凭证')}` : ''} · ${Math.ceil(Number(a.size || 0) / 1024)} KB</div>`).join('')}</div>` : ''}
+      ${(w.attachments || []).length ? `<div class="cc-history"><strong>${ccText('Attachments', '凭证附件')}</strong>${w.attachments.map(a => `<div class="cc-meta">${['image/png','image/jpeg'].includes(a.mimeType) ? `<button type="button" class="btn btn-sm" data-workflow-image-preview="${escapeHtml(w.id)}:${escapeHtml(a.id)}">${escapeHtml(a.name)}</button>` : `<a href="/api/v2/workflows/${encodeURIComponent(w.id)}/attachments/${encodeURIComponent(a.id)}/download">${escapeHtml(a.name)}</a>`} · ${escapeHtml(({before:'整改前',after:'整改后',supporting:'其他凭证'})[a.evidenceType || 'supporting'] || '')}${a.executionRound ? ` · ${ccText('Round', '第')} ${escapeHtml(a.executionRound)} ${ccText('evidence', '轮凭证')}` : ''} · ${Math.ceil(Number(a.size || 0) / 1024)} KB${['image/png','image/jpeg'].includes(a.mimeType) ? ` · <a href="/api/v2/workflows/${encodeURIComponent(w.id)}/attachments/${encodeURIComponent(a.id)}/download" download>${ccText('Download', '下载')}</a>` : ''}</div>`).join('')}</div>` : ''}
       ${w.type === 'store_remediation' && ['approved','execution_pending','awaiting_review'].includes(w.status) ? `<div class="cc-meta">${ccText('Upload both before and after evidence before submitting this remediation for review.', '整改提交复查前，需要同时上传整改前和整改后凭证。')}</div>` : ''}
       ${ACTIVE_CONTROL_TYPES[w.type] && !['rejected','cancelled','completed'].includes(w.status) && canDiscussWorkflow ? `<div class="cc-form-grid"><form data-v2-comment="${escapeHtml(w.id)}" class="cc-inline-form"><input name="comment" required maxlength="2000" placeholder="${ccText('Add a process comment', '添加流程备注')}"/><button class="btn btn-sm">${ccText('Comment', '备注')}</button></form><form data-v2-attachment="${escapeHtml(w.id)}" class="cc-inline-form">${w.type === 'store_remediation' ? `<select name="evidenceType">${evidenceTypeOptions}</select>` : `<input type="hidden" name="evidenceType" value="supporting"/>`}<input name="file" type="file" accept="application/pdf,image/png,image/jpeg,.csv,.xlsx,.xls,.xlsm,.xlsb" required/><button class="btn btn-sm">${w.type === 'store_remediation' ? ccText('Upload evidence', '上传凭证') : ccText('Upload attachment', '上传附件')}</button></form></div>` : ''}
       ${(w.history || []).length ? `<details class="cc-history"><summary>${ccText('Approval sign-off and history', '审批签署与流程记录')}</summary>${w.history.map(h => `<div class="cc-meta"><strong>${escapeHtml(h.actorName || '')}</strong> · ${escapeHtml(({submit:'已提交',approve:'已审批',reject:'已驳回',return:'已退回',delegate:'已转交审批',execution:'已登记执行',review_pass:'复查通过',review_return:'退回整改',cancel:'已撤回',resubmit:'重新提交',comment:'添加备注','assignee.update':'调整负责人'})[h.action] || h.action)} · ${escapeHtml(new Date(h.createdAt).toLocaleString())}${h.note ? ` · ${escapeHtml(h.note)}` : ''}</div>`).join('')}</details>` : ''}
@@ -1403,7 +1404,7 @@ async function renderControlCenter(root) {
       return `<details class="cc-department-node" open><summary><span class="cc-tree-folder">▾</span><strong>${escapeHtml(department.name)}</strong><small>${people.length} ${ccText('people', '人')}</small>${can('org.manage') ? `<button type="button" class="btn btn-sm" data-directory-edit="departments:${escapeHtml(department.id)}">${ccText('Edit', '编辑')}</button>` : ''}</summary><div class="cc-tree-people">${people.map(person).join('') || `<span class="cc-muted">${ccText('No people assigned', '暂无人员')}</span>`}</div></details>`;
     }).join('');
     const unassigned = employees.filter(employee => !employeeDepartment(employee));
-    organizationSection.innerHTML = `<header class="cc-org-page-header"><div><h2>${ccText('Departments & people', '部门与人员')}</h2><p>${departments.length} ${ccText('departments', '个部门')} · ${employees.length} ${ccText('employees', '名员工')}</p></div>${can('org.manage') ? `<button type="button" class="btn btn-primary" data-org-new="departments">＋ ${ccText('Add department', '新增部门')}</button>` : ''}</header><section class="cc-org-directory"><div class="cc-org-table-actions"><input type="search" data-org-filter="people-tree" placeholder="${ccText('Search department, name or position', '搜索部门、姓名或岗位')}"/>${can('staff.create') ? `<button type="button" class="btn" data-org-new="employees">＋ ${ccText('Add employee', '新增员工')}</button>` : ''}</div><div class="cc-org-tree cc-people-tree" data-org-tree>${departmentTree || `<span class="cc-muted">${ccText('No departments configured', '暂无部门')}</span>`}${unassigned.length ? `<details class="cc-department-node" open><summary><span class="cc-tree-folder">▾</span><strong>${ccText('Unassigned people', '未分配人员')}</strong><small>${unassigned.length} ${ccText('people', '人')}</small></summary><div class="cc-tree-people">${unassigned.map(person).join('')}</div></details>` : ''}</div></section>`;
+    organizationSection.innerHTML = `<header class="cc-org-page-header"><div><h2>${ccText('Departments & people', '部门与人员')}</h2><p>${departments.length} ${ccText('departments', '个部门')} · ${employees.length} ${ccText('employees', '名员工')}</p></div>${can('org.manage') ? `<button type="button" class="btn btn-primary" data-org-new="departments">＋ ${ccText('Add department', '新增部门')}</button>` : ''}</header><section class="cc-org-directory"><div class="cc-org-table-actions"><input type="search" data-org-filter="people-tree" placeholder="${ccText('Search department, name or position', '搜索部门、姓名或岗位')}"/>${can('staff.create') ? `<button type="button" class="btn" data-org-new="employees">＋ ${ccText('Add employee', '新增员工')}</button>` : ''}</div><div class="cc-org-tree cc-people-tree" data-org-tree>${departmentTree || `<span class="cc-muted">${ccText('No departments configured', '暂无部门')}</span>`}${unassigned.length ? `<details class="cc-department-node" open><summary><span class="cc-tree-folder">▾</span><strong>${ccText('Unassigned people', '未分配人员')}</strong><small>${unassigned.length} ${ccText('people', '人')}</small></summary><div class="cc-tree-people">${unassigned.map(person).join('')}</div></details>` : ''}</div>${can('staff.edit') && archivedEmployees.length ? `<details class="cc-archive"><summary>${ccText('Removed employees', '已移除员工')} (${archivedEmployees.length})</summary><p>${ccText('Removed employee profiles keep approval history and account links. Restore does not change account permissions.', '已移除员工会保留审批历史和账号关系；恢复不会更改账号权限。')}</p>${archivedEmployees.map(employee => `<div class="cc-meta"><strong>${escapeHtml(employee.name)}</strong> · ${escapeHtml(employee.employeeCode)} <button type="button" class="btn btn-sm" data-v2-restore-employee="${escapeHtml(employee.id)}">${ccText('Restore', '恢复')}</button></div>`).join('')}</details>` : ''}</section>`;
     organizationSections.slice(1).forEach(section => section.remove());
     $('#ccEmployeeForm', root)?.closest('section')?.remove();
   }
@@ -1575,7 +1576,9 @@ async function renderControlCenter(root) {
     state.workflowOffset = 0; await renderControlCenter(root);
   });
   $('[data-workflow-reset]', root)?.addEventListener('click', async () => {
-    state.workflowFilters = { q: '', status: '', type: '', actionable: false }; state.workflowOffset = 0; await renderControlCenter(root);
+    const form = $('#ccWorkflowFilterForm', root); form?.reset();
+    state.workflowFilters = { q: '', status: '', type: '', actionable: false }; state.workflowOffset = 0;
+    await renderControlCenter(root);
   });
   $('[data-workflow-actionable]', root)?.addEventListener('click', async () => {
     state.workflowFilters = state.workflowFilters?.actionable
@@ -1823,9 +1826,11 @@ async function renderControlCenter(root) {
   $('#ccEmployeeForm')?.addEventListener('submit', async e => { e.preventDefault(); const fd = new FormData(e.currentTarget); try { await POST('/api/v2/employees', Object.fromEntries(fd.entries())); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } });
   $$('[data-v2-edit-employee]', root).forEach(button => button.addEventListener('click', () => {
     const item = employees.find(x => x.id === button.dataset.v2EditEmployee); if (!item) return;
-    const modal = openModal({ title: ccText('Edit employee', '编辑员工档案'), body: `<form id="ccEmployeeEdit" class="cc-form-grid"><label class="cc-field"><span>${ccText('Name', '姓名')}</span><input name="name" required value="${escapeHtml(item.name)}"/></label><label class="cc-field"><span>${ccText('Phone', '电话')}</span><input name="phone" value="${escapeHtml(item.phone || '')}"/></label><label class="cc-field"><span>${ccText('Email', '邮箱')}</span><input name="email" type="email" value="${escapeHtml(item.email || '')}"/></label></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccEmployeeSave">${ccText('Save', '保存')}</button>` });
+    const modal = openModal({ title: ccText('Edit employee', '编辑员工档案'), body: `<form id="ccEmployeeEdit" class="cc-form-grid"><label class="cc-field"><span>${ccText('Name', '姓名')}</span><input name="name" required value="${escapeHtml(item.name)}"/></label><label class="cc-field"><span>${ccText('Phone', '电话')}</span><input name="phone" value="${escapeHtml(item.phone || '')}"/></label><label class="cc-field"><span>${ccText('Email', '邮箱')}</span><input name="email" type="email" value="${escapeHtml(item.email || '')}"/></label></form>`, footer: `<button class="btn btn-danger" id="ccEmployeeArchive">${ccText('Remove employee', '移除员工')}</button><button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccEmployeeSave">${ccText('Save', '保存')}</button>` });
     $('#ccEmployeeSave', modal).addEventListener('click', async () => { const fd = new FormData($('#ccEmployeeEdit', modal)); try { await PUT(`/api/v2/employees/${encodeURIComponent(item.id)}`, Object.fromEntries(fd.entries())); closeModal(); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } });
+    $('#ccEmployeeArchive', modal).addEventListener('click', async () => { const ok = await confirmDialog({ title: ccText('Remove employee profile?', '移除员工档案？'), body: `${escapeHtml(item.name)}<br>${ccText('This is recoverable: approval history and account links are retained. The account itself and its permissions will not be changed.', '这是可恢复移除：审批历史和账号关系会保留，账号本身及其权限不会被更改。')}`, confirmLabel: ccText('Remove profile', '确认移除'), danger: true }); if (!ok) return; try { await POST(`/api/v2/employees/${encodeURIComponent(item.id)}/archive`, {}); closeModal(); toast(ccText('Employee profile removed; it can be restored.', '员工档案已移除，可随时恢复。'), 'success'); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } });
   }));
+  $$('[data-v2-restore-employee]', root).forEach(button => button.addEventListener('click', async () => { try { await POST(`/api/v2/employees/${encodeURIComponent(button.dataset.v2RestoreEmployee)}/restore`, {}); toast(ccText('Employee profile restored', '员工档案已恢复'), 'success'); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } }));
   $$('[data-v2-resubmit]', root).forEach(form => {
     bindWorkflowFields(form);
     form.addEventListener('submit', async e => {
@@ -1960,6 +1965,23 @@ async function renderControlCenter(root) {
       await POST(`/api/v2/workflows/${encodeURIComponent(form.dataset.v2Attachment)}/attachments`, { fileName: file.name, mimeType, evidenceType: fd.get('evidenceType'), data });
       toast(ccText('Evidence uploaded', '凭证已上传'), 'success'); await renderControlCenter(root);
     } catch (err) { toast(err.message, 'error'); }
+  }));
+  $$('[data-workflow-image-preview]', root).forEach(button => button.addEventListener('click', async () => {
+    const [workflowId, attachmentId] = String(button.dataset.workflowImagePreview || '').split(':');
+    if (!workflowId || !attachmentId) return;
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/v2/workflows/${encodeURIComponent(workflowId)}/attachments/${encodeURIComponent(attachmentId)}/download?disposition=inline`, { credentials: 'same-origin' });
+      const type = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+      if (!response.ok) throw new Error(ccText('Image preview is unavailable. It may have expired or you may no longer have access.', '图片预览不可用。附件可能已过期，或您已没有访问权限。'));
+      if (!['image/png','image/jpeg'].includes(type)) throw new Error(ccText('This attachment is not a safe image preview.', '该附件不是可安全预览的图片。'));
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const modal = openModal({ title: ccText('Attachment preview', '附件预览'), wide: true, body: `<div class="cc-attachment-preview"><img style="max-width:100%;height:auto" src="${objectUrl}" alt="${ccText('Workflow attachment', '流程附件')}"/></div>`, footer: `<button class="btn" id="ccAttachmentZoom">${ccText('Zoom', '放大')}</button><button class="btn" data-close>${ccText('Close', '关闭')}</button>` });
+      modal._cleanup = () => URL.revokeObjectURL(objectUrl);
+      const image = $('img', modal); image?.addEventListener('error', () => toast(ccText('The image could not be displayed.', '图片无法显示。'), 'error'));
+      $('#ccAttachmentZoom', modal)?.addEventListener('click', event => { const expanded = event.currentTarget.dataset.expanded !== 'true'; event.currentTarget.dataset.expanded = String(expanded); event.currentTarget.textContent = expanded ? ccText('Fit to window', '适应窗口') : ccText('Zoom', '放大'); if (image) image.style.maxWidth = expanded ? 'none' : '100%'; });
+    } catch (err) { toast(err.message, 'error'); }
+    finally { button.disabled = false; }
   }));
   $$('[data-task-checklist]', root).forEach(input => input.addEventListener('change', async () => { try { await POST(`/api/v2/tasks/${encodeURIComponent(input.dataset.taskChecklist)}/checklist/${encodeURIComponent(input.dataset.taskCheckId)}`, { completed: input.checked }); await renderControlCenter(root); } catch (err) { input.checked = !input.checked; toast(err.message, 'error'); } }));
   $$('[data-task-comment-form]', root).forEach(form => form.addEventListener('submit', async e => { e.preventDefault(); const comment = new FormData(form).get('comment'); try { await POST(`/api/v2/tasks/${encodeURIComponent(form.dataset.taskCommentForm)}/comments`, { comment }); toast(ccText('Comment added', '备注已添加'), 'success'); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } }));
@@ -2533,12 +2555,16 @@ function openModal({ title, body, footer, wide = false }) {
     </div>
   `;
   root.addEventListener('click', closeOnBackdrop);
+  root._escapeHandler = event => { if (event.key === 'Escape') closeModal(); };
+  document.addEventListener('keydown', root._escapeHandler);
   $$('[data-close]', root).forEach(b => b.addEventListener('click', closeModal));
   activeModal = root;
   return root;
 }
 function closeModal() {
   if (activeModal) {
+    activeModal._cleanup?.();
+    if (activeModal._escapeHandler) document.removeEventListener('keydown', activeModal._escapeHandler);
     activeModal.classList.add('hidden');
     activeModal.innerHTML = '';
     activeModal = null;
