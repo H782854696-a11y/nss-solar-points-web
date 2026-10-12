@@ -38,6 +38,7 @@ const state = {
   taskOffset: 0,
   notificationOffset: 0,
   storeOperationOffsets: { reports: 0, inspections: 0, issues: 0 },
+  workspaceSettings: null,
 };
 
 // =================== API 客户端 ===================
@@ -162,6 +163,24 @@ async function loadMe() {
   // role / grants 挂在响应顶层（与 user 平级），这里合并进 state.me 供 UI 使用
   state.me = Object.assign({}, r.user, { role: r.role, grants: r.grants || [], mustChangePassword: !!r.mustChangePassword });
   return state.me;
+}
+
+async function loadWorkspaceSettings() {
+  state.workspaceSettings = await GET('/api/v2/workspace-settings/me');
+  return state.workspaceSettings;
+}
+function workspaceItemLabel(key) {
+  const labels = { overview: ccText('Control Platform', '中控平台'), approvals: ccText('Approval Center', '审批中心'), collaboration: ccText('Tasks & notifications', '任务协作'), storeops: ccText('Store follow-up', '门店跟进'), purchasing: ccText('Order Progress', '跟单进度'), announcements: ccText('Announcements', '内容公告') };
+  return labels[key] || key;
+}
+function applyWorkspaceSettings() {
+  const settings = state.workspaceSettings?.effectiveSettings;
+  if (!settings) return;
+  state.ccWorkspace = settings.defaultWorkspace || 'overview';
+  // 顺序仅作用于已有入口；没有权限的入口仍由现有 RBAC 门禁隐藏，绝不因配置而出现。
+  const ordered = settings.menuOrder || [];
+  const navItems = new Map($$('[data-workspace]').map(el => [el.dataset.workspace, el]));
+  ordered.forEach(key => { const el = navItems.get(key); if (el?.parentElement) el.parentElement.appendChild(el); });
 }
 
 /** 登录页密码「显示/隐藏」切换（纯 UI，不改认证逻辑；loading 态只作用于 #loginSubmit） */
@@ -377,6 +396,8 @@ let appBound = false;
 
 async function initApp() {
   renderUserBlock();
+  try { await loadWorkspaceSettings(); } catch (err) { state.workspaceSettings = null; }
+  applyWorkspaceSettings();
   // 侧栏入口按角色显隐。用 display 而不是 remove()：
   // remove() 是永久移除，店长登录过一次之后管理员再登录，入口就再也回不来了。
   $$('.nav-item').forEach(el => {
@@ -4469,6 +4490,41 @@ function bindSelfAccountSettings(root) {
   });
 }
 
+const WORKSPACE_LAYOUT_KEYS = ['overview', 'approvals', 'collaboration', 'storeops', 'purchasing', 'announcements'];
+const WORKSPACE_MODULES = [
+  ['my_tasks', ccText('My tasks', '待办任务')],
+  ['approval_reminders', ccText('Approval reminders', '跟单提醒')],
+  ['announcements', ccText('Latest announcements', '最新公告')],
+];
+function workspaceSettingsForm(id, settings, { positionOptions = false } = {}) {
+  const source = settings || { menuOrder: WORKSPACE_LAYOUT_KEYS, defaultWorkspace: 'overview', homeModules: WORKSPACE_MODULES.map(([key]) => key) };
+  const order = [...new Set([...(source.menuOrder || []), ...WORKSPACE_LAYOUT_KEYS])].filter(x => WORKSPACE_LAYOUT_KEYS.includes(x));
+  return `<form id="${id}" class="cc-workspace-settings-form"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Default home page', '默认首页')}</span><select name="defaultWorkspace">${order.map(key => `<option value="${key}" ${source.defaultWorkspace === key ? 'selected' : ''}>${escapeHtml(workspaceItemLabel(key))}</option>`).join('')}</select></label></div><div class="cc-workspace-layout-list"><strong>${ccText('Menu display and order', '菜单显示与顺序')}</strong><p class="cc-meta">${ccText('Only features already authorized for the account are shown.', '仅列出该账号已获授权的功能。')}</p>${order.map((key, index) => `<div class="cc-workspace-layout-row" data-layout-key="${key}"><span>${escapeHtml(workspaceItemLabel(key))}</span><span><button type="button" class="btn btn-sm" data-layout-move="up" ${index === 0 ? 'disabled' : ''}>↑</button><button type="button" class="btn btn-sm" data-layout-move="down" ${index === order.length - 1 ? 'disabled' : ''}>↓</button></span></div>`).join('')}</div><fieldset class="cc-workspace-modules"><legend>${ccText('Home modules', '首页模块')}</legend>${WORKSPACE_MODULES.map(([key, label]) => `<label><input type="checkbox" name="homeModules" value="${key}" ${(source.homeModules || []).includes(key) ? 'checked' : ''}/> ${escapeHtml(label)}</label>`).join('')}</fieldset><input type="hidden" name="menuOrder" value="${escapeHtml(order.join(','))}"/>${positionOptions ? `<label class="cc-field"><span>${ccText('Position', '职位')}</span><select name="positionId"></select></label>` : ''}<div class="cc-inline-form"><button class="btn btn-primary" type="submit">${ccText('Save settings', '保存设置')}</button></div></form>`;
+}
+function workspaceSettingsPayload(form) {
+  return { settings: { defaultWorkspace: String(form.elements.defaultWorkspace.value || 'overview'), menuOrder: String(form.elements.menuOrder.value || '').split(',').filter(Boolean), homeModules: $$('input[name="homeModules"]:checked', form).map(input => input.value) } };
+}
+function bindWorkspaceOrder(form) {
+  const redraw = () => {
+    const values = $$('[data-layout-key]', form).map(row => row.dataset.layoutKey);
+    form.elements.menuOrder.value = values.join(',');
+    const selected = form.elements.defaultWorkspace.value;
+    form.elements.defaultWorkspace.innerHTML = values.map(key => `<option value="${key}" ${selected === key ? 'selected' : ''}>${escapeHtml(workspaceItemLabel(key))}</option>`).join('');
+    $$('[data-layout-move]', form).forEach(button => button.addEventListener('click', () => { const row = button.closest('[data-layout-key]'), previous = row.previousElementSibling, next = row.nextElementSibling; if (button.dataset.layoutMove === 'up' && previous?.matches('[data-layout-key]')) row.parentElement.insertBefore(row, previous); if (button.dataset.layoutMove === 'down' && next?.matches('[data-layout-key]')) row.parentElement.insertBefore(next, row); redraw(); }));
+  };
+  redraw();
+}
+function workspaceSettingsPanel(positionItems) {
+  const effective = state.workspaceSettings?.effectiveSettings;
+  const personal = state.workspaceSettings?.personalSettings || effective;
+  return `<section class="card cc-section" aria-label="${ccText('Workspace settings', '职位工作台设置')}"><h3>${ccText('Position workspace settings', '职位工作台设置')}</h3><p>${ccText('Position defaults are shared by accounts in that position. An account can make a personal display-only override and restore the position default at any time. These settings never change permissions.', '职位默认布局会应用到该职位账号；账号可单独覆盖显示设置，也可随时恢复职位默认。本设置不改变任何权限。')}</p><div class="cc-workspace-settings-columns"><div><h4>${ccText('My account override', '账号单独设置')}</h4>${workspaceSettingsForm('ccPersonalWorkspaceForm', personal)}<button type="button" class="btn" id="ccRestorePositionWorkspace">${ccText('Restore position default', '恢复职位默认')}</button></div>${positionItems?.length ? `<div><h4>${ccText('Position default', '职位默认')}</h4>${workspaceSettingsForm('ccPositionWorkspaceForm', positionItems[0]?.settings, { positionOptions: true })}</div>` : ''}</div></section>`;
+}
+function bindWorkspaceSettings(root, positionItems) {
+  const personal = $('#ccPersonalWorkspaceForm', root); if (personal) { bindWorkspaceOrder(personal); personal.addEventListener('submit', async event => { event.preventDefault(); try { state.workspaceSettings = await PUT('/api/v2/workspace-settings/me', workspaceSettingsPayload(personal)); applyWorkspaceSettings(); toast(ccText('Personal workspace layout saved', '账号工作台设置已保存'), 'success'); } catch (err) { toast(err.message, 'error'); } }); }
+  $('#ccRestorePositionWorkspace', root)?.addEventListener('click', async () => { try { state.workspaceSettings = await DELETE('/api/v2/workspace-settings/me'); applyWorkspaceSettings(); toast(ccText('Restored the position default', '已恢复职位默认'), 'success'); await renderAccounts(root); } catch (err) { toast(err.message, 'error'); } });
+  const positionForm = $('#ccPositionWorkspaceForm', root); if (positionForm) { const select = positionForm.elements.positionId; const selectedId = positionForm.dataset.positionId || positionItems[0]?.position.id || ''; select.innerHTML = positionItems.map(item => `<option value="${escapeHtml(item.position.id)}" ${item.position.id === selectedId ? 'selected' : ''}>${escapeHtml(item.position.name)}</option>`).join(''); const load = () => { const item = positionItems.find(x => x.position.id === select.value); const replacement = workspaceSettingsForm('ccPositionWorkspaceForm', item?.settings, { positionOptions: true }); positionForm.outerHTML = replacement; const next = $('#ccPositionWorkspaceForm', root); next.dataset.positionId = select.value; bindWorkspaceSettings(root, positionItems); }; bindWorkspaceOrder(positionForm); select.addEventListener('change', load); positionForm.addEventListener('submit', async event => { event.preventDefault(); try { await PUT(`/api/v2/workspace-settings/positions/${encodeURIComponent(select.value)}`, workspaceSettingsPayload(positionForm)); toast(ccText('Position default saved', '职位默认布局已保存'), 'success'); } catch (err) { toast(err.message, 'error'); } }); }
+}
+
 async function renderAccounts(root) {
   const canManageAccounts = can('system.user.view');
   const personalSettings = selfAccountSettingsHtml();
@@ -4476,8 +4532,10 @@ async function renderAccounts(root) {
   if (!canManageAccounts) {
     root.innerHTML = `
       <div class="page-header"><div class="page-header-text"><div class="page-title">${t('accounts.title')}</div><div class="page-subtitle">${t('account.subtitle')}</div></div></div>
-      ${personalSettings}`;
+      ${personalSettings}
+      ${workspaceSettingsPanel(null)}`;
     bindSelfAccountSettings(root);
+    bindWorkspaceSettings(root, null);
     return;
   }
   // 门店名解析要用最新门店表（有 store.view 才刷；没有就沿用已有数据，只影响展示）
@@ -4485,8 +4543,9 @@ async function renderAccounts(root) {
   const data = await GET('/api/users');
   const items = data.items || [];
   const canEdit = can('system.user.edit');
-  const [regionData, employeeData] = canEdit ? await Promise.all([GET('/api/v2/regions'), GET('/api/v2/employees')]) : [{ items: [] }, { items: [] }];
+  const [regionData, employeeData, workspacePositionData] = canEdit ? await Promise.all([GET('/api/v2/regions'), GET('/api/v2/employees'), GET('/api/v2/workspace-settings/positions')]) : [{ items: [] }, { items: [] }, { items: null }];
   const accountRegions = regionData.items || [], accountEmployees = employeeData.items || [];
+  const workspacePositionItems = workspacePositionData.items || null;
   const me = state.me || {};
   const enabledCount = items.filter(x => !x.disabled).length;
   const mobile = isMobile();
@@ -4579,6 +4638,7 @@ async function renderAccounts(root) {
       <div class="page-spacer"></div>
     </div>
     ${personalSettings}
+    ${workspaceSettingsPanel(workspacePositionItems)}
     <div class="cc-workspace-stats">${uiStat(ccText('Total accounts', '账号总数'), items.length, 'brand')}${uiStat(ccText('Enabled', '启用中'), enabledCount, 'success')}${uiStat(ccText('Disabled', '已停用'), items.length - enabledCount, 'neutral')}${uiStat(ccText('Store linked', '关联门店'), storeAccountCount, 'warning')}</div>
     ${canEdit ? `<section class="card cc-section"><h3>${ccText('Create login account', '创建登录账号')}</h3><p>${ccText('Set a unique username and a temporary password of at least 6 characters. Store and regional roles must be bound to their scope.', '用户名须唯一，初始密码至少 6 位。门店和区域岗位必须绑定对应范围。')}</p><form id="ccAccountForm" class="cc-form-grid"><label class="cc-field"><span>${ccText('Username', '用户名')}</span><input name="username" required minlength="3" maxlength="48" pattern="[A-Za-z0-9_]+"/></label><label class="cc-field"><span>${ccText('Full name', '姓名')}</span><input name="name" required maxlength="120"/></label><label class="cc-field"><span>${ccText('Initial password (6+ characters)', '初始密码（至少 6 位）')}</span><input name="password" type="password" required minlength="6" autocomplete="new-password"/></label><label class="cc-field"><span>${ccText('Role', '角色')}</span><select name="role"><option value="owner">${escapeHtml(roleLabel('owner'))}</option><option value="hq_operator">${escapeHtml(roleLabel('hq_operator'))}</option><option value="philippines_manager">${escapeHtml(roleLabel('philippines_manager'))}</option><option value="regional_manager">${escapeHtml(roleLabel('regional_manager'))}</option><option value="purchaser">${escapeHtml(roleLabel('purchaser'))}</option><option value="manager">${escapeHtml(roleLabel('store_manager'))}</option><option value="sales">${escapeHtml(roleLabel('sales'))}</option><option value="warehouse">${escapeHtml(roleLabel('warehouse'))}</option><option value="service">${escapeHtml(roleLabel('service'))}</option><option value="admin">${escapeHtml(roleLabel('admin'))}</option></select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">${ccText('No store', '不绑定门店')}</option>${state.stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Region', '区域')}</span><select name="regionId"><option value="">${ccText('No region', '不绑定区域')}</option>${accountRegions.map(r => `<option value="${escapeHtml(r.id)}">${escapeHtml(r.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Employee profile', '关联员工档案')}</span><select name="employeeId"><option value="">${ccText('No employee link', '不关联员工')}</option>${accountEmployees.filter(x => !x.userId).map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Phone', '电话')}</span><input name="phone" maxlength="80"/></label><div class="cc-wide"><button class="btn btn-primary" type="submit">${ccText('Create account', '创建账号')}</button></div></form></section>` : ''}
     <div class="card" style="padding:11px 16px;display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--muted);">
@@ -4592,6 +4652,7 @@ async function renderAccounts(root) {
   `;
 
   bindSelfAccountSettings(root);
+  bindWorkspaceSettings(root, workspacePositionItems);
 
   $('#ccAccountForm')?.addEventListener('submit', async e => {
     e.preventDefault(); const fd = new FormData(e.currentTarget);

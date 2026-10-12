@@ -317,6 +317,64 @@ app.post('/api/auth/change-password', (req, res) => {
   res.json({ ok: true, mustChangePassword: false });
 });
 
+// ============ 职位工作台设置（仅展示配置，不改变权限） ============
+const WORKSPACE_LAYOUT_KEYS = ['overview', 'approvals', 'collaboration', 'storeops', 'purchasing', 'announcements'];
+const WORKSPACE_HOME_MODULES = ['my_tasks', 'approval_reminders', 'announcements'];
+function cleanWorkspaceSettings(raw) {
+  const source = raw && typeof raw === 'object' ? raw : {};
+  const ordered = Array.isArray(source.menuOrder) ? source.menuOrder.filter(x => WORKSPACE_LAYOUT_KEYS.includes(x)) : [];
+  const menuOrder = [...new Set(ordered.concat(WORKSPACE_LAYOUT_KEYS))];
+  const defaultWorkspace = WORKSPACE_LAYOUT_KEYS.includes(source.defaultWorkspace) ? source.defaultWorkspace : 'overview';
+  const modules = Array.isArray(source.homeModules) ? [...new Set(source.homeModules.filter(x => WORKSPACE_HOME_MODULES.includes(x)))] : WORKSPACE_HOME_MODULES;
+  return { menuOrder, defaultWorkspace, homeModules: modules };
+}
+function workspaceLayoutFor(user) {
+  const all = readAll('workspaceLayouts') || [];
+  const employee = user?.employeeId ? (readAll('employees') || []).find(x => x.id === user.employeeId && x.active !== false) : null;
+  const position = employee?.positionId || null;
+  const positionLayout = position ? all.find(x => x.kind === 'position' && x.positionId === position) : null;
+  const personalLayout = user ? all.find(x => x.kind === 'user' && x.userId === user.id) : null;
+  return { positionId: position, positionSettings: positionLayout ? cleanWorkspaceSettings(positionLayout.settings) : null, personalSettings: personalLayout ? cleanWorkspaceSettings(personalLayout.settings) : null, effectiveSettings: cleanWorkspaceSettings(personalLayout?.settings || positionLayout?.settings), hasPersonalOverride: !!personalLayout };
+}
+app.get('/api/v2/workspace-settings/me', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  res.json(workspaceLayoutFor(u));
+});
+app.put('/api/v2/workspace-settings/me', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const settings = cleanWorkspaceSettings((req.body || {}).settings);
+  const all = readAll('workspaceLayouts') || [], now = nowIso();
+  let item = all.find(x => x.kind === 'user' && x.userId === u.id);
+  if (item) { item.settings = settings; item.updatedAt = now; item.updatedBy = u.id; }
+  else { item = { id: nanoid(), kind: 'user', userId: u.id, positionId: null, settings, createdAt: now, updatedAt: now, updatedBy: u.id }; all.push(item); }
+  writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.personal.update', 'workspaceLayout', item.id, {});
+  res.json(workspaceLayoutFor(u));
+});
+app.delete('/api/v2/workspace-settings/me', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const all = readAll('workspaceLayouts') || [], index = all.findIndex(x => x.kind === 'user' && x.userId === u.id);
+  if (index >= 0) { const [item] = all.splice(index, 1); writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.personal.restore_position_default', 'workspaceLayout', item.id, {}); }
+  res.json(workspaceLayoutFor(u));
+});
+app.get('/api/v2/workspace-settings/positions', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.user.edit')) return;
+  const layouts = readAll('workspaceLayouts') || [];
+  res.json({ items: (readAll('positions') || []).filter(x => x.active !== false).map(position => ({ position, settings: cleanWorkspaceSettings(layouts.find(x => x.kind === 'position' && x.positionId === position.id)?.settings) })) });
+});
+app.put('/api/v2/workspace-settings/positions/:positionId', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.user.edit')) return;
+  const position = (readAll('positions') || []).find(x => x.id === req.params.positionId && x.active !== false);
+  if (!position) return res.status(404).json({ error: '职位不存在或已停用' });
+  const settings = cleanWorkspaceSettings((req.body || {}).settings), all = readAll('workspaceLayouts') || [], now = nowIso();
+  let item = all.find(x => x.kind === 'position' && x.positionId === position.id);
+  if (item) { item.settings = settings; item.updatedAt = now; item.updatedBy = u.id; }
+  else { item = { id: nanoid(), kind: 'position', userId: null, positionId: position.id, settings, createdAt: now, updatedAt: now, updatedBy: u.id }; all.push(item); }
+  writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.position.update', 'workspaceLayout', item.id, { positionId: position.id });
+  res.json({ position, settings });
+});
+
 // ============ 门店管理 ============
 
 app.get('/api/stores', (req, res) => {
