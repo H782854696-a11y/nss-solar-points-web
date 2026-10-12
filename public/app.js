@@ -4524,6 +4524,15 @@ function bindWorkspaceSettings(root, positionItems) {
   $('#ccRestorePositionWorkspace', root)?.addEventListener('click', async () => { try { state.workspaceSettings = await DELETE('/api/v2/workspace-settings/me'); applyWorkspaceSettings(); toast(ccText('Restored the position default', '已恢复职位默认'), 'success'); await renderAccounts(root); } catch (err) { toast(err.message, 'error'); } });
   const positionForm = $('#ccPositionWorkspaceForm', root); if (positionForm) { const select = positionForm.elements.positionId; const selectedId = positionForm.dataset.positionId || positionItems[0]?.position.id || ''; select.innerHTML = positionItems.map(item => `<option value="${escapeHtml(item.position.id)}" ${item.position.id === selectedId ? 'selected' : ''}>${escapeHtml(item.position.name)}</option>`).join(''); const load = () => { const item = positionItems.find(x => x.position.id === select.value); const replacement = workspaceSettingsForm('ccPositionWorkspaceForm', item?.settings, { positionOptions: true }); positionForm.outerHTML = replacement; const next = $('#ccPositionWorkspaceForm', root); next.dataset.positionId = select.value; bindWorkspaceSettings(root, positionItems); }; bindWorkspaceOrder(positionForm); select.addEventListener('change', load); positionForm.addEventListener('submit', async event => { event.preventDefault(); try { await PUT(`/api/v2/workspace-settings/positions/${encodeURIComponent(select.value)}`, workspaceSettingsPayload(positionForm)); toast(ccText('Position default saved', '职位默认布局已保存'), 'success'); } catch (err) { toast(err.message, 'error'); } }); }
 }
+async function openAccountWorkspaceSettings(account) {
+  try {
+    const data = await GET(`/api/v2/workspace-settings/users/${encodeURIComponent(account.id)}`);
+    const modal = openModal({ title: `${ccText('Account workspace settings', '账号工作台设置')} · ${escapeHtml(account.name || account.username)}`, body: `<p class="cc-meta">${ccText('This is a display-only override for this account. It never changes the account role or permissions.', '这是该账号的展示覆盖，不会改变账号角色或权限。')}</p>${workspaceSettingsForm('ccManagedWorkspaceForm', data.personalSettings || data.effectiveSettings)}`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn" id="ccManagedWorkspaceRestore">${ccText('Restore position default', '恢复职位默认')}</button>` });
+    const form = $('#ccManagedWorkspaceForm', modal); bindWorkspaceOrder(form);
+    form.addEventListener('submit', async event => { event.preventDefault(); try { await PUT(`/api/v2/workspace-settings/users/${encodeURIComponent(account.id)}`, workspaceSettingsPayload(form)); closeModal(); toast(ccText('Account workspace settings saved', '账号工作台设置已保存'), 'success'); } catch (err) { toast(err.message, 'error'); } });
+    $('#ccManagedWorkspaceRestore', modal)?.addEventListener('click', async () => { try { await DELETE(`/api/v2/workspace-settings/users/${encodeURIComponent(account.id)}`); closeModal(); toast(ccText('Restored the position default', '已恢复职位默认'), 'success'); } catch (err) { toast(err.message, 'error'); } });
+  } catch (err) { toast(err.message, 'error'); }
+}
 
 async function renderAccounts(root) {
   const canManageAccounts = can('system.user.view');
@@ -4587,7 +4596,8 @@ async function renderAccounts(root) {
     const btnDisable = canDisable ? `<button class="btn btn-sm cc-icon-action cc-warning" data-uid="${escapeHtml(a.id)}" data-act="disable" title="${t('accounts.disableTitle')}"><span aria-hidden="true">⊘</span>${t('accounts.disable')}</button>` : '';
     const btnDelete  = canDelete  ? `<button class="btn btn-sm cc-icon-action cc-danger" data-uid="${escapeHtml(a.id)}" data-act="delete" title="${t('accounts.deleteTitle')}"><span aria-hidden="true">✕</span>${t('accounts.delete')}</button>` : '';
     const btnResetPw = canResetPw ? `<button class="btn btn-sm cc-icon-action" data-uid="${escapeHtml(a.id)}" data-act="resetPw" title="${t('accounts.resetPwTitle')}"><span aria-hidden="true">↻</span>${t('accounts.resetPwShort')}</button>` : '';
-    const action = (a.disabled ? btnEnable + btnDelete : btnDisable + btnDelete) + btnResetPw;
+    const btnWorkspace = canEdit ? `<button class="btn btn-sm cc-icon-action" data-workspace-account="${escapeHtml(a.id)}" title="${ccText('Account workspace settings', '账号工作台设置')}"><span aria-hidden="true">☷</span>${ccText('Workspace', '工作台')}</button>` : '';
+    const action = (a.disabled ? btnEnable + btnDelete : btnDisable + btnDelete) + btnResetPw + btnWorkspace;
 
     if (mobile) {
       // 手机端：两列（信息堆叠 + 操作按钮），门店放第一行（按门店归类看）
@@ -4667,6 +4677,9 @@ async function renderAccounts(root) {
     if (b.dataset.act === 'delete') confirmUserDelete(target);
     else if (b.dataset.act === 'resetPw') resetPasswordDialog(target);
     else confirmUserStatus(target, b.dataset.act === 'disable');
+  }));
+  $$('[data-workspace-account]', root).forEach(button => button.addEventListener('click', () => {
+    const account = items.find(item => item.id === button.dataset.workspaceAccount); if (account) openAccountWorkspaceSettings(account);
   }));
 }
 

@@ -26,6 +26,12 @@ test('workspace layouts remain display-only and support personal restore plus ad
   assert.ok(positions.data.items.length > 0);
   const saved = await app.request('PUT', `/api/v2/workspace-settings/positions/${positions.data.items[0].position.id}`, { settings: { defaultWorkspace: 'collaboration' } }, admin);
   assert.equal(saved.status, 200);
+  const users = await app.request('GET', '/api/users', null, admin);
+  const target = users.data.items.find(item => item.id !== original.data.userId) || users.data.items[0];
+  const managed = await app.request('PUT', `/api/v2/workspace-settings/users/${target.id}`, { settings: { defaultWorkspace: 'announcements' } }, admin);
+  assert.equal(managed.status, 200);
+  assert.equal(managed.data.hasPersonalOverride, true);
+  assert.equal((await app.request('DELETE', `/api/v2/workspace-settings/users/${target.id}`, null, admin)).status, 200);
 });
 
 test('workspace settings UI exposes position defaults, personal override and restore without changing permissions', () => {
@@ -33,8 +39,10 @@ test('workspace settings UI exposes position defaults, personal override and res
   const server = fs.readFileSync(path.resolve(__dirname, '../server.js'), 'utf8');
   assert.match(app, /职位工作台设置/);
   assert.match(app, /恢复职位默认/);
+  assert.match(app, /data-workspace-account/);
   assert.match(app, /Only features already authorized/);
   assert.match(server, /workspace-settings\/me/);
+  assert.match(server, /workspace-settings\/users\/:userId/);
   assert.match(server, /system\.user\.edit/);
   assert.match(server, /WORKSPACE_LAYOUT_KEYS/);
 });

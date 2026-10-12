@@ -374,6 +374,37 @@ app.put('/api/v2/workspace-settings/positions/:positionId', (req, res) => {
   writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.position.update', 'workspaceLayout', item.id, { positionId: position.id });
   res.json({ position, settings });
 });
+app.get('/api/v2/workspace-settings/users/:userId', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.user.edit')) return;
+  const target = (readAll('users') || []).find(x => x.id === req.params.userId);
+  if (!target) return res.status(404).json({ error: '账号不存在' });
+  if (!guard.check(req, res, 'system.user.edit', target)) return;
+  res.json({ user: { id: target.id, username: target.username, name: target.name, disabled: !!target.disabled }, ...workspaceLayoutFor(target) });
+});
+app.put('/api/v2/workspace-settings/users/:userId', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.user.edit')) return;
+  const target = (readAll('users') || []).find(x => x.id === req.params.userId);
+  if (!target) return res.status(404).json({ error: '账号不存在' });
+  if (!guard.check(req, res, 'system.user.edit', target)) return;
+  const settings = cleanWorkspaceSettings((req.body || {}).settings), all = readAll('workspaceLayouts') || [], now = nowIso();
+  let item = all.find(x => x.kind === 'user' && x.userId === target.id);
+  if (item) { item.settings = settings; item.updatedAt = now; item.updatedBy = u.id; }
+  else { item = { id: nanoid(), kind: 'user', userId: target.id, positionId: null, settings, createdAt: now, updatedAt: now, updatedBy: u.id }; all.push(item); }
+  writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.user.update', 'workspaceLayout', item.id, { userId: target.id });
+  res.json(workspaceLayoutFor(target));
+});
+app.delete('/api/v2/workspace-settings/users/:userId', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.user.edit')) return;
+  const target = (readAll('users') || []).find(x => x.id === req.params.userId);
+  if (!target) return res.status(404).json({ error: '账号不存在' });
+  if (!guard.check(req, res, 'system.user.edit', target)) return;
+  const all = readAll('workspaceLayouts') || [], index = all.findIndex(x => x.kind === 'user' && x.userId === target.id);
+  if (index >= 0) { const [item] = all.splice(index, 1); writeAll('workspaceLayouts', all); recordControlAudit(req, u, 'workspace.user.restore_position_default', 'workspaceLayout', item.id, { userId: target.id }); }
+  res.json(workspaceLayoutFor(target));
+});
 
 // ============ 门店管理 ============
 
