@@ -38,8 +38,6 @@ const state = {
   taskOffset: 0,
   notificationOffset: 0,
   storeOperationOffsets: { reports: 0, inspections: 0, issues: 0 },
-  ccAuditFilters: { q: '', from: '', to: '' },
-  ccAuditOffset: 0,
 };
 
 // =================== API 客户端 ===================
@@ -974,17 +972,13 @@ async function renderControlCenter(root) {
   if (state.taskFilters?.storeId) taskQuery.set('storeId', state.taskFilters.storeId);
   if (state.taskFilters?.q) taskQuery.set('q', state.taskFilters.q);
   const notificationQuery = new URLSearchParams({ limit: '25', offset: String(state.notificationOffset || 0) });
-  const auditQuery = new URLSearchParams({ limit: '25', offset: String(state.ccAuditOffset || 0) });
-  if (state.ccAuditFilters?.q) auditQuery.set('q', state.ccAuditFilters.q);
-  if (state.ccAuditFilters?.from) auditQuery.set('from', state.ccAuditFilters.from);
-  if (state.ccAuditFilters?.to) auditQuery.set('to', state.ccAuditFilters.to);
   const storeOperationQuery = new URLSearchParams({ limit: '10', reportsOffset: String(state.storeOperationOffsets?.reports || 0), inspectionsOffset: String(state.storeOperationOffsets?.inspections || 0), issuesOffset: String(state.storeOperationOffsets?.issues || 0) });
   // 采购跟单筛选（2026-10-07）：与后端 PURCHASE_STAGES 顺序一致，索引即进度条步数
   const PURCHASE_STAGES = ['ordered', 'preparing', 'loaded', 'in_transit', 'arrived', 'customs', 'warehoused'];
   const purchaseQuery = new URLSearchParams({ limit: '20', offset: String(state.purchaseOffset || 0) });
   if (state.purchaseFilters?.q) purchaseQuery.set('q', state.purchaseFilters.q);
   if (state.purchaseFilters?.stage) purchaseQuery.set('stage', state.purchaseFilters.stage);
-  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, auditData, operationData, accountData, announcementData, recentWorkflowData, recentActionableWorkflowData, recentTaskData, recentMyTaskData, purchaseData, regionData, workflowStoreData, archivedEmployeeData] = await Promise.all([
+  const [workflowData, definitionData, taskData, orgData, employeeData, noticeData, storeData, assigneeData, operationData, accountData, announcementData, recentWorkflowData, recentActionableWorkflowData, recentTaskData, recentMyTaskData, purchaseData, regionData, workflowStoreData, archivedEmployeeData] = await Promise.all([
     mayViewWorkflows ? GET(`/api/v2/workflows?${workflowQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
     can('workflow.configure') ? GET('/api/v2/workflows/definitions') : Promise.resolve({ items: [] }),
     mayViewTasks ? GET(`/api/v2/tasks?${taskQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25, counts: {} }),
@@ -993,7 +987,6 @@ async function renderControlCenter(root) {
     GET(`/api/v2/notifications?${notificationQuery.toString()}`),
     can('store.view') ? GET('/api/stores').catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
     can('task.assign') ? GET('/api/v2/task-assignees') : Promise.resolve({ items: [] }),
-    can('system.audit.view') ? GET(`/api/v2/audit-events?${auditQuery.toString()}`) : Promise.resolve({ items: [], total: 0, offset: 0, limit: 25 }),
     can('store.view') ? GET(`/api/v2/store-operations?${storeOperationQuery.toString()}`) : Promise.resolve({ reports: [], inspections: [], issues: [], pages: {} }),
     can('workflow.configure') && can('system.user.view') ? GET('/api/users').catch(() => ({ items: [] })) : Promise.resolve({ items: [] }),
     GET('/api/v2/announcements'),
@@ -1013,7 +1006,6 @@ async function renderControlCenter(root) {
   if (mayViewWorkflows) state.workflowOffset = Number(workflowData.offset || 0);
   if (mayViewTasks) state.taskOffset = Number(taskData.offset || 0);
   state.notificationOffset = Number(noticeData.offset || 0);
-  state.ccAuditOffset = Number(auditData.offset || 0);
   for (const key of ['reports','inspections','issues']) if (operationData.pages?.[key]) state.storeOperationOffsets[key] = Number(operationData.pages[key].offset || 0);
   const allWorkflows = workflowData.items || [], workflows = allWorkflows.filter(item => ACTIVE_CONTROL_TYPES[item.type]), archivedWorkflows = allWorkflows.filter(item => !ACTIVE_CONTROL_TYPES[item.type]);
   const tasks = taskData.items || [], orgs = orgData.items || [];
@@ -1096,7 +1088,6 @@ async function renderControlCenter(root) {
     return `${Math.floor(diff / 86400000)} ${ccText('d ago', '天前')}`;
   };
   const assignees = assigneeData.items || [];
-  const auditEvents = auditData.items || [];
   const storeReports = operationData.reports || [], storeInspections = operationData.inspections || [], storeIssues = operationData.issues || [];
   const purchaseItems = purchaseData.items || [], purchaseTotal = Number(purchaseData.total || 0);
   const purchaseOffset = Number(purchaseData.offset || 0), purchaseLimit = Number(purchaseData.limit || 20);
@@ -1184,7 +1175,7 @@ async function renderControlCenter(root) {
     announcements: [stat(ccText('Published', '已发布'), announcements.filter(x => x.status === 'published').length, 'success'), stat(ccText('Pinned', '置顶中'), announcements.filter(x => x.status === 'published' && x.pinned).length, 'brand')].join(''),
     storeops: [stat(ccText('Daily reports', '每日汇报'), operationData.pages?.reports?.total, 'brand'), stat(ccText('Inspections', '巡检记录'), operationData.pages?.inspections?.total, 'success'), stat(ccText('Historical issues', '历史问题'), operationData.pages?.issues?.total, 'neutral')].join(''),
     // 治理工作区（2026-10-08）：组织架构已独立为置顶入口，此处不再重复统计组织数量
-    governance: [can('staff.view') ? stat(ccText('Employees', '员工档案'), employees.length, 'neutral') : '', can('workflow.configure') ? stat(ccText('Approval routes', '审批路径'), definitions.length, 'warning') : '', can('system.audit.view') ? stat(ccText('Audit events', '审计事件'), auditData.total, 'success') : ''].join(''),
+    governance: [can('staff.view') ? stat(ccText('Employees', '员工档案'), employees.length, 'neutral') : '', can('workflow.configure') ? stat(ccText('Approval routes', '审批路径'), definitions.length, 'warning') : ''].join(''),
   };
   const storeOperationPager = key => {
     const page = operationData.pages?.[key] || { offset: 0, limit: 10, total: 0 };
@@ -1350,7 +1341,6 @@ async function renderControlCenter(root) {
       ${can('purchase.create') ? `<details class="cc-purchase-new"><summary>${ccText('Add a new batch', '＋ 新增采购批次')}</summary><form id="ccPurchaseForm" class="cc-form-grid"><label class="cc-field"><span>${ccText('Order number', '订单号')}</span><input name="orderNo" required placeholder="PO-2026-001"/></label><label class="cc-field"><span>${ccText('Supplier', '供应商')}</span><input name="supplier" required/></label><label class="cc-field"><span>${ccText('Product', '货物名称')}</span><input name="productName"/></label><label class="cc-field"><span>${ccText('Quantity', '数量')}</span><input name="quantity" placeholder="500 pcs"/></label><label class="cc-field"><span>${ccText('Amount (CNY)', '金额（人民币）')}</span><input name="amount" type="number" min="0" step="0.01"/></label><label class="cc-field"><span>${ccText('Current stage', '当前阶段')}</span><select name="stage">${PURCHASE_STAGES.map(s => `<option value="${escapeHtml(s)}">${escapeHtml(purchaseStageLabel(s))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('ETD (sailing)', 'ETD 开船日')}</span><input name="etd" type="date"/></label><label class="cc-field"><span>${ccText('ETA (arrival)', 'ETA 预计到港')}</span><input name="eta" type="date"/></label><label class="cc-field"><span>${ccText('Vessel', '船名')}</span><input name="vessel"/></label><label class="cc-field"><span>${ccText('B/L number', '提单号')}</span><input name="blNo"/></label><label class="cc-field"><span>${ccText('Container number', '柜号')}</span><input name="containerNo"/></label><label class="cc-field"><span>${ccText('Port of loading', '起运港')}</span><input name="portOfLoading"/></label><label class="cc-field"><span>${ccText('Port of discharge', '目的港')}</span><input name="portOfDischarge"/></label><label class="cc-field cc-wide"><span>${ccText('Note', '备注')}</span><textarea name="note" rows="2"></textarea></label><div><button class="btn btn-primary">${ccText('Add batch', '新增批次')}</button></div></form></details>` : ''}
       <div class="cc-list">${purchaseItems.length ? purchaseItems.map(renderPurchaseCard).join('') : ccEmptyState(ccText('No shipment records yet', '暂无采购批次记录'), ccText('Add the first batch above, then update its shipping status as it moves.', '在上方新增第一个批次，之后随物流推进更新状态。'))}</div>${purchasePager}
       ${can('purchase.edit') && purchaseItems.length ? `<form id="ccPurchaseImages" class="cc-form-grid cc-upload-panel"><h3 class="cc-wide">${ccText('Upload shipment images', '上传跟单图片附件')}</h3><label class="cc-field cc-wide"><span>${ccText('Shipment batch', '采购批次')}</span><select name="shipmentId" required><option value="">${ccText('Choose a batch from this page', '请选择本页采购批次')}</option>${purchaseItems.map(x => `<option value="${escapeHtml(x.id)}">${escapeHtml(x.orderNo)} · ${escapeHtml(x.supplier)}</option>`).join('')}</select></label>${workflowPhotoField('stocktake')}<div><button type="submit" class="btn btn-primary">${ccText('Upload images','上传图片')}</button></div></form>` : ''}</section>` : ''}
-    ${can('system.audit.view') ? `<section class="cc-section" data-cc-area="governance"><h3>${ccText('Audit events', '操作审计')}</h3><form id="ccAuditFilterForm" class="cc-workflow-filters"><input type="search" name="q" value="${escapeHtml(state.ccAuditFilters?.q || '')}" placeholder="${ccText('Search action, user or record', '搜索操作、人员或记录')}"/><label class="cc-field"><span>${ccText('From', '开始日期')}</span><input type="date" name="from" value="${escapeHtml(state.ccAuditFilters?.from || '')}"/></label><label class="cc-field"><span>${ccText('To', '结束日期')}</span><input type="date" name="to" value="${escapeHtml(state.ccAuditFilters?.to || '')}"/></label><button class="btn btn-sm" type="submit">${ccText('Search', '筛选')}</button><button class="btn btn-sm" type="button" data-audit-reset>${ccText('Reset', '重置')}</button><span class="cc-meta">${ccPageSummary(auditData)}</span></form><div class="cc-list">${auditEvents.length ? auditEvents.map(a => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(a.action)}</strong><span class="cc-meta">${escapeHtml(new Date(a.createdAt).toLocaleString())}</span></div><div class="cc-meta">${escapeHtml(a.actorName)} · ${escapeHtml(a.resourceType)} · ${escapeHtml(a.resourceId || '')}</div></article>`).join('') : `${ccEmptyState(ccText('No V2 audit events', '暂无 V2 操作记录'), ccText('Audit entries will appear here after actions are performed.', '操作发生后，审计记录会显示在这里。'))}`}</div><div class="cc-actions cc-workflow-pager"><button type="button" class="btn btn-sm" data-audit-page="prev" ${auditData.offset <= 0 ? 'disabled' : ''}>${ccText('Previous', '上一页')}</button><button type="button" class="btn btn-sm" data-audit-page="next" ${auditData.offset + auditData.limit >= auditData.total ? 'disabled' : ''}>${ccText('Next', '下一页')}</button></div></section>` : ''}
     <section class="cc-section" data-cc-area="collaboration"><h3>${ccText('Notifications', '通知')} · ${ccText('Unread', '未读')} ${Number(noticeData.unread || 0)}</h3><div class="cc-list">${notices.length ? notices.map(n => `<article class="card cc-card"><div class="cc-card-top"><strong>${escapeHtml(n.title)}</strong>${!n.readAt ? `<button class="btn btn-sm" data-notice-read="${escapeHtml(n.id)}">${ccText('Mark read', '标为已读')}</button>` : ''}</div><div>${escapeHtml(n.body)}</div><div class="cc-meta">${escapeHtml(new Date(n.createdAt).toLocaleString())}</div></article>`).join('') : `${ccEmptyState(ccText('No notifications', '暂无通知'), ccText('New notifications will appear here.', '有新通知时会显示在这里。'))}`}</div><div class="cc-actions cc-workflow-pager"><span class="cc-meta">${ccPageSummary(noticeData)}</span><button type="button" class="btn btn-sm" data-notice-page="prev" ${noticeData.offset <= 0 ? 'disabled' : ''}>${ccText('Previous', '上一页')}</button><button type="button" class="btn btn-sm" data-notice-page="next" ${noticeData.offset + noticeData.limit >= noticeData.total ? 'disabled' : ''}>${ccText('Next', '下一页')}</button></div></section>`;
 
   // Approved C layout: a wide worktable is the primary home view. Existing
@@ -2002,18 +1992,6 @@ async function renderControlCenter(root) {
   }));
   $$('[data-notice-read]', root).forEach(btn => btn.addEventListener('click', async () => { try { await POST(`/api/v2/notifications/${encodeURIComponent(btn.dataset.noticeRead)}/read`, {}); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } }));
   $$('[data-notice-page]', root).forEach(button => button.addEventListener('click', async () => { state.notificationOffset = Math.max(0, Number(noticeData.offset || 0) + (button.dataset.noticePage === 'next' ? Number(noticeData.limit || 25) : -Number(noticeData.limit || 25))); await renderControlCenter(root); }));
-  $('#ccAuditFilterForm')?.addEventListener('submit', async e => {
-    e.preventDefault(); const fd = new FormData(e.currentTarget);
-    const from = String(fd.get('from') || ''), to = String(fd.get('to') || '');
-    if (from && to && from > to) { toast(ccText('Start date must be before end date', '开始日期不能晚于结束日期'), 'error'); return; }
-    state.ccAuditFilters = { q: String(fd.get('q') || '').trim(), from, to }; state.ccAuditOffset = 0;
-    try { await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); }
-  });
-  $('[data-audit-reset]', root)?.addEventListener('click', async () => { state.ccAuditFilters = { q: '', from: '', to: '' }; state.ccAuditOffset = 0; await renderControlCenter(root); });
-  $$('[data-audit-page]', root).forEach(button => button.addEventListener('click', async () => {
-    state.ccAuditOffset = Math.max(0, Number(auditData.offset || 0) + (button.dataset.auditPage === 'next' ? Number(auditData.limit || 25) : -Number(auditData.limit || 25)));
-    await renderControlCenter(root);
-  }));
 }
 
 function approvalPill(status) {

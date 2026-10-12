@@ -146,6 +146,16 @@ persist_deployment_state
 trap on_deployment_signal HUP INT TERM
 trap on_deployment_exit EXIT
 
+# Explicitly approved policy migration: inspect first, create the verified
+# backup above, stop the JSON writer, then atomically apply the narrow change.
+echo "Password policy migration dry-run:"
+node "$NEW_RELEASE/deploy/migrate-password-change-policy.js" --data-dir "$DATA_DIR" --dry-run
+if pm2 describe solarpoints-v2 >/dev/null 2>&1; then
+  pm2 stop solarpoints-v2
+fi
+echo "Password policy migration apply:"
+node "$NEW_RELEASE/deploy/migrate-password-change-policy.js" --data-dir "$DATA_DIR" --apply
+
 cat > "$APP_ROOT/ecosystem.v2.config.cjs" <<'PM2'
 module.exports = {
   apps: [{

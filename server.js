@@ -720,8 +720,9 @@ app.post('/api/users/:id/reset-password', (req, res) => {
   if (newPassword.length < 6) return res.status(400).json({ error: '新密码至少 6 位' });
 
   target.password = bcrypt.hashSync(newPassword, 12);
-  // 重置为临时密码后，所有角色都必须先自行改密；不能因角色而绕过此门禁。
-  target.mustChangePassword = true;
+  // 管理员设置的密码可直接用于登录；个人账号页仍可随时主动改密。
+  // 初始管理员/旧默认凭据的独立保护由 seed migration 保留，不在这里绕过。
+  target.mustChangePassword = false;
   writeAll('users', users);   // 只改 password 一个字段 → dataVersion 正常 +1
   // 作废该账号的全部旧会话
   let killed = 0;
@@ -1372,7 +1373,7 @@ app.post('/api/v2/users', (req, res) => {
   const PH_ROLES = new Set(['philippines_manager', 'regional_manager', 'store_manager', 'manager', 'sales', 'warehouse', 'service']);
   const storeRegion = store?.regionId ? regions.find(x => x.id === store.regionId) : null;
   const userCountry = region?.countryCode || storeRegion?.countryCode || (PH_ROLES.has(role) ? 'PH' : (b.country || 'CN'));
-  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, storeId: store?.id || null, regionId: role === 'regional_manager' ? region.id : (region?.id || store?.regionId || null), employeeId: employee?.id || null, phone: controlCenter.cleanText(b.phone, 80), createdAt: nowIso(), disabled: false, mustChangePassword: !isStoreManagerRole(role), country: userCountry };
+  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, storeId: store?.id || null, regionId: role === 'regional_manager' ? region.id : (region?.id || store?.regionId || null), employeeId: employee?.id || null, phone: controlCenter.cleanText(b.phone, 80), createdAt: nowIso(), disabled: false, mustChangePassword: false, country: userCountry };
   users.push(user); writeAll('users', users);
   if (employee) { employee.userId = user.id; employee.name = name; if (!employee.storeId && store) employee.storeId = store.id; if (!employee.regionId) employee.regionId = user.regionId; employee.updatedAt = nowIso(); writeAll('employees', employees); }
   if (role === 'manager' && store) { store.managerId = user.id; store.managerName = name; writeAll('stores', stores); }

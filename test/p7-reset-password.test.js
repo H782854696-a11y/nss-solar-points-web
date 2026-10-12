@@ -192,7 +192,7 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
     bcrypt.compareSync(NEW_PW, userById('U-victim').password) &&
     !bcrypt.compareSync(PW, userById('U-victim').password));
   ok('★ 只改了 password 与强制改密标记：其余字段逐字节未变', shapeOf(userById('U-victim')) === shapeBefore);
-  ok('★ 重置后首次登录必须改密', userById('U-victim').mustChangePassword === true);
+  ok('★ 管理员重置后可直接登录（不强制改密）', userById('U-victim').mustChangePassword === false);
   ok('★ dataVersion 发生变化', dv() !== dvBefore, { before: dvBefore, after: dv() });
   ok('★ 审计行已写入（且不含密码）',
     new RegExp('reset-password: t_victim \\(manager\\) by t_admin').test(auditText()) &&
@@ -201,7 +201,7 @@ const reset = (who, id, newPassword) => as(who, 'POST', '/api/users/' + id + '/r
 
   console.log('\n【C-2】登录与会话行为');
   ok('★ 新密码可以登录 → 200', (await loginAs('t_victim', NEW_PW)) === 200);
-  ok('★ 新会话在改密前不能访问业务接口', (await as('t_victim', 'GET', '/api/users')).status === 401);
+  ok('★ 新会话仍按原有权限门禁处理业务接口', (await as('t_victim', 'GET', '/api/users')).status === 403);
   ok('★ 旧密码已失效 → 401', (await loginAs('t_victim', PW)) === 401);
   ok('★ 重置前拿到的旧会话已被作废 → 401（无需等 TTL）', (await (async () => {
     // ⚠ 必须用「重置之前」那一份 cookie 去试：loginAs 会覆盖 cookies 变量，
