@@ -267,7 +267,7 @@
     'role.service': ['Service', '售后/技术'],
   'role.purchaser': ['Purchasing', '采购员'],
   // 采购跟单工作区（2026-10-07 新增）
-  'nav.workspacePurchasing': ['Shipment dashboard', '跟单仪表盘'],
+  'nav.workspacePurchasing': ['Order Progress', '跟单进度'],
   'purchase.stage.ordered': ['Order placed', '已下单'],
   'purchase.stage.preparing': ['Preparing / QC', '备货验货'],
   'purchase.stage.loaded': ['Loaded on vessel', '已开船'],
