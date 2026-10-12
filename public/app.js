@@ -1396,6 +1396,7 @@ async function renderControlCenter(root) {
   // 角色级关闭：店长的「门店跟进 / 组织与流程设置」工作区整体移出，
   // 其 section 不计入 availableAreas → 页内标签页与跳转按钮一并失效（下方统一按此集合判定）。
   const availableAreas = new Set(Array.from(root.querySelectorAll('[data-cc-area]'), section => section.dataset.ccArea).filter(area => canAccessWorkspace(area)));
+  $$('[data-cc-area="approvals"] [data-cc-quick]', root).forEach(button => button.remove());
   root.querySelectorAll('[data-cc-area]').forEach(section => { if (!canAccessWorkspace(section.dataset.ccArea)) section.remove(); });
   root.querySelectorAll('[data-cc-tab]').forEach(button => { if (button.dataset.ccTab !== 'overview') button.hidden = !availableAreas.has(button.dataset.ccTab); });
   root.querySelectorAll('[data-cc-jump]').forEach(button => { button.hidden = !availableAreas.has(button.dataset.ccJump); });
