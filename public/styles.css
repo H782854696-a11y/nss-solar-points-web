@@ -381,6 +381,13 @@ html[lang^="en"] #loginPage .login-submit { padding-right:58px; letter-spacing:.
 .cc-org-tree summary::-webkit-details-marker { display: none; }
 .cc-tree-folder { color: var(--brand); font-size: 15px; }
 .cc-org-tree summary small, .cc-tree-people small { color: var(--muted); margin-left: auto; font-size: 11px; }
+.cc-people-tree { margin-top: 0; }
+.cc-department-node > summary { gap: 10px; }
+.cc-department-node > summary .btn { margin-left: 8px; }
+.cc-person-row { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 38px; padding: 8px 10px 8px 32px; border: 0; border-left: 1px solid #d8e5f1; background: transparent; color: var(--ink); font: inherit; text-align: left; cursor: pointer; }
+.cc-person-row::before { content: '•'; color: var(--brand); font-size: 20px; line-height: 1; }
+.cc-person-row:hover, .cc-person-row:focus-visible { background: #f3f8fd; outline: 0; }
+.cc-person-row small { margin-left: 0; }
 .cc-tree-children { margin-left: 16px; padding-left: 15px; border-left: 1px solid #dce6f5; }
 .cc-tree-people { margin: 2px 0 8px 16px; padding-left: 15px; border-left: 1px solid #dce6f5; display: grid; gap: 5px; }
 .cc-tree-people > span { display: flex; gap: 8px; align-items: center; min-height: 28px; color: var(--ink); }

@@ -1407,12 +1407,19 @@ app.get('/api/v2/regions', (req, res) => {
   if (!guard.checkPerm(req, res, 'org.view')) return;
   res.json({ items: (readAll('regions') || []).filter(x => x.active !== false && controlVisible(req, 'org.view', x)) });
 });
+function nextGeneratedCode(items, prefix) {
+  const used = new Set((items || []).map(item => String(item.code || item.employeeCode || '').trim().toUpperCase()).filter(Boolean));
+  let candidate;
+  do { candidate = `${prefix}-${nanoid(10).toUpperCase()}`; } while (used.has(candidate));
+  return candidate;
+}
 app.post('/api/v2/regions', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'org.manage')) return;
-  const b = req.body || {}, code = controlCenter.cleanText(b.code, 40).toUpperCase(), name = controlCenter.cleanText(b.name, 120);
-  if (!code || !name) return res.status(400).json({ error: '区域编码和名称不能为空' });
+  const b = req.body || {}, name = controlCenter.cleanText(b.name, 120);
+  if (!name) return res.status(400).json({ error: '区域名称不能为空' });
   const items = readAll('regions') || [];
+  const code = controlCenter.cleanText(b.code, 40).toUpperCase() || nextGeneratedCode(items, 'REG');
   if (items.some(x => x.code.toLowerCase() === code.toLowerCase())) return res.status(409).json({ error: '区域编码已存在' });
   const now = nowIso(), item = { id: nanoid(), code, name, organizationId: b.organizationId || null, countryCode: controlCenter.cleanText(b.countryCode || 'PH', 2).toUpperCase(), active: true, createdAt: now, updatedAt: now };
   items.push(item); writeAll('regions', items); recordControlAudit(req, u, 'region.create', 'region', item.id, { code, name }); res.status(201).json({ item });
@@ -1475,16 +1482,25 @@ app.get('/api/v2/employees', (req, res) => {
 app.post('/api/v2/employees', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   if (!guard.checkPerm(req, res, 'staff.create')) return;
-  const b = req.body || {}, name = controlCenter.cleanText(b.name, 120), employeeCode = controlCenter.cleanText(b.employeeCode, 40).toUpperCase();
-  if (!name || !employeeCode) return res.status(400).json({ error: '员工姓名和员工编号不能为空' });
+  const b = req.body || {}, name = controlCenter.cleanText(b.name, 120);
+  if (!name) return res.status(400).json({ error: '员工姓名不能为空' });
   if (b.warehouseId) return res.status(400).json({ error: '当前版本不维护仓库负责人关系' });
   const storeId = b.storeId || (guard.scopeOf(req, 'staff.create').level === 'store' ? u.storeId : null);
   if (!guard.check(req, res, 'staff.create', { storeId, country: 'PH' })) return;
   const items = readAll('employees') || [];
+  const employeeCode = controlCenter.cleanText(b.employeeCode, 40).toUpperCase() || nextGeneratedCode(items, 'EMP');
   if (items.some(x => x.employeeCode.toLowerCase() === employeeCode.toLowerCase())) return res.status(409).json({ error: '员工编号已存在' });
-  if (b.positionId && !(readAll('positions') || []).some(x => x.id === b.positionId && x.active !== false)) return res.status(400).json({ error: '所选职位不存在或已停用' });
+  const department = b.departmentId ? (readAll('departments') || []).find(x => x.id === b.departmentId && x.active !== false) : null;
+  if (b.departmentId && !department) return res.status(400).json({ error: '所选部门不存在或已停用' });
+  const position = b.positionId ? (readAll('positions') || []).find(x => x.id === b.positionId && x.active !== false) : null;
+  if (b.positionId && !position) return res.status(400).json({ error: '所选职位不存在或已停用' });
+  if (position?.departmentId && department && position.departmentId !== department.id) return res.status(400).json({ error: '所选职位不属于该部门' });
+  const departmentId = department?.id || position?.departmentId || null;
+  const resolvedDepartment = departmentId ? (readAll('departments') || []).find(x => x.id === departmentId) : null;
+  const organizationId = resolvedDepartment?.organizationId || b.organizationId || null;
+  if (b.organizationId && resolvedDepartment?.organizationId && b.organizationId !== resolvedDepartment.organizationId) return res.status(400).json({ error: '所选部门不属于该组织' });
   const linkedStore = storeId ? (readAll('stores') || []).find(x => x.id === storeId) : null;
-  const now = nowIso(), item = { id: nanoid(), employeeCode, name, email: controlCenter.cleanText(b.email, 180), phone: controlCenter.cleanText(b.phone, 80), organizationId: b.organizationId || null, departmentId: b.departmentId || null, positionId: b.positionId || null, storeId, warehouseId: null, regionId: linkedStore?.regionId || null, userId: b.userId || null, active: true, createdAt: now, updatedAt: now };
+  const now = nowIso(), item = { id: nanoid(), employeeCode, name, email: controlCenter.cleanText(b.email, 180), phone: controlCenter.cleanText(b.phone, 80), organizationId, departmentId, positionId: position?.id || null, storeId, warehouseId: null, regionId: linkedStore?.regionId || null, userId: b.userId || null, active: true, createdAt: now, updatedAt: now };
   items.push(item); writeAll('employees', items); recordControlAudit(req, u, 'employee.create', 'employee', item.id, { employeeCode, name });
   res.status(201).json({ item });
 });

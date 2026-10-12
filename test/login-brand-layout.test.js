@@ -14,5 +14,5 @@ test('login uses the original small upper-left NSS Solar logo with no promotiona
   assert.doesNotMatch(index, /login-promo-copy|login\.titleMain|login\.titleAccent|login\.subtitle/);
   assert.match(css, /#loginPage \.login-logo \{ display:block; width:clamp\(280px,21vw,320px\)/);
   assert.doesNotMatch(css, /#loginPage \.login-logo[^}]*mix-blend-mode:/);
-  assert.match(index, /styles\.css\?v=57/);
+  assert.match(index, /styles\.css\?v=58/);
 });

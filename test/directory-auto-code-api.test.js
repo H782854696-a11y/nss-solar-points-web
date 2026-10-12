@@ -1,0 +1,23 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { startLocalApp } = require('./helpers/local-app');
+
+test('employee and region codes are generated once while explicit legacy codes remain compatible', async t => {
+  const app = await startLocalApp(); t.after(app.close);
+  const admin = await app.login('admin');
+  const requests = await Promise.all(Array.from({ length: 8 }, (_, index) => app.request('POST', '/api/v2/employees', { name: `Fixture employee ${index}` }, admin)));
+  assert.ok(requests.every(result => result.status === 201), JSON.stringify(requests.map(result => result.data)));
+  const employeeCodes = requests.map(result => result.data.item.employeeCode);
+  assert.equal(new Set(employeeCodes.map(code => code.toLowerCase())).size, employeeCodes.length);
+  assert.ok(employeeCodes.every(code => /^EMP-[A-Z0-9_-]+$/.test(code)));
+  const explicit = await app.request('POST', '/api/v2/employees', { name: 'Legacy employee', employeeCode: 'legacy-employee-7' }, admin);
+  assert.equal(explicit.status, 201); assert.equal(explicit.data.item.employeeCode, 'LEGACY-EMPLOYEE-7');
+  const edited = await app.request('PUT', `/api/v2/employees/${explicit.data.item.id}`, { name: 'Legacy employee renamed' }, admin);
+  assert.equal(edited.status, 200); assert.equal(edited.data.item.employeeCode, 'LEGACY-EMPLOYEE-7');
+  const regions = await Promise.all(Array.from({ length: 5 }, (_, index) => app.request('POST', '/api/v2/regions', { name: `Fixture region ${index}` }, admin)));
+  assert.ok(regions.every(result => result.status === 201), JSON.stringify(regions.map(result => result.data)));
+  const regionCodes = regions.map(result => result.data.item.code);
+  assert.equal(new Set(regionCodes.map(code => code.toLowerCase())).size, regionCodes.length);
+  assert.ok(regionCodes.every(code => /^REG-[A-Z0-9_-]+$/.test(code)));
+});
