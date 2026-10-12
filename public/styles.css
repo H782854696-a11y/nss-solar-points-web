@@ -99,7 +99,7 @@ button, input, select, textarea { font-family: inherit; }
 #loginPage .login-shade { display:none; }
 #loginPage .login-layout { position:relative; z-index:2; min-height:100%; display:grid; grid-template-columns:minmax(0,1.58fr) minmax(390px,.93fr); align-items:center; gap:clamp(48px,7vw,136px); padding:clamp(42px,6vw,96px) clamp(54px,5.2vw,84px); }
 #loginPage .login-promo { align-self:stretch; display:flex; flex-direction:column; min-width:0; }
-#loginPage .login-logo { display:block; width:clamp(280px,21vw,320px); height:auto; margin:0; filter:none; mix-blend-mode:multiply; }
+#loginPage .login-logo { display:block; width:clamp(280px,21vw,320px); height:auto; margin:0; filter:none; }
 #loginPage .login-entry { width:min(100%,505px); padding-bottom:4vh; }
 #loginPage .login-welcome { margin-bottom:44px; }
 #loginPage .login-welcome i { display:block; width:64px; height:10px; margin-bottom:30px; border-radius:999px; background:linear-gradient(90deg,#009844,#11b458); }
@@ -127,7 +127,7 @@ html[lang^="en"] #loginPage .login-submit { padding-right:58px; letter-spacing:.
 /* =================== 登录页（2026-09-25 沉浸式居中版：全屏照片整体压暗 + 单一中央轴线
    logo → 中文主标题 → 英文字距副题 → 深色半透明面板）
    2026-10-07 主色统一：交互色由品牌绿改为中控平台主色蓝 #1D4ED8，与登录后的界面一致。
-   LOGO 与品牌资产保持原绿色（logo-green.png / logo-brand.png），不改动。 =================== */
+   LOGO 与品牌资产保持原绿色（透明登录副本 / logo-brand.png），不改动。 =================== */
 .login-page {
   --login-accent: #2F63E0;          /* 主交互色：按钮、聚焦光环 */
   --login-accent-strong: #1D4ED8;
