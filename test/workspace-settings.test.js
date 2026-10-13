@@ -57,3 +57,39 @@ test('workspace settings UI exposes department defaults, account overrides and c
   assert.match(server, /system\.user\.edit/);
   assert.match(server, /WORKSPACE_LAYOUT_KEYS/);
 });
+
+test('workspace layout visibility changes only configurable entries and preserves static RBAC navigation', () => {
+  const app = fs.readFileSync(path.resolve(__dirname, '../public/app.js'), 'utf8');
+  const index = fs.readFileSync(path.resolve(__dirname, '../public/index.html'), 'utf8');
+  const layoutKeys = ['overview', 'approvals', 'collaboration', 'storeops', 'purchasing', 'announcements'];
+  const helperSource = app.match(/function isWorkspaceLayoutEntry\(key\)\s*\{\s*return WORKSPACE_LAYOUT_KEYS\.includes\(key\);\s*\}/)?.[0];
+  assert.ok(helperSource, 'applyWorkspaceSettings must use an explicit layout-entry allowlist');
+  const isWorkspaceLayoutEntry = new Function('WORKSPACE_LAYOUT_KEYS', `${helperSource}; return isWorkspaceLayoutEntry;`)(layoutKeys);
+  const visible = new Set(['approvals']); // Legacy menuOrder without visibleMenus.
+  const nav = new Map([
+    ['overview', { hidden: false, display: '' }],
+    ['approvals', { hidden: false, display: '' }],
+    ['org', { hidden: false, display: '' }],
+    // A user without org.view is already hidden by the normal RBAC pass.
+    ['governance', { hidden: false, display: 'none' }],
+  ]);
+
+  // Execute the production allowlist policy: layouts may only hide their six
+  // explicitly configurable workspaces.
+  for (const [key, item] of nav) if (isWorkspaceLayoutEntry(key)) item.hidden = !visible.has(key);
+
+  assert.equal(nav.get('overview').hidden, true, 'visibleMenus may hide a configurable workspace');
+  assert.equal(nav.get('approvals').hidden, false, 'visibleMenus keeps a selected configurable workspace');
+  assert.equal(nav.get('org').hidden, false, 'legacy menuOrder must not hide Department Personnel');
+  assert.equal(nav.get('governance').hidden, false, 'layout must not mutate other static navigation');
+  assert.equal(nav.get('governance').display, 'none', 'the existing RBAC denial remains authoritative');
+
+  // Saving, restoring, or reloading all rerun the same function; verify the
+  // implementation cannot write hidden on a non-layout entry in any path.
+  assert.match(app, /function isWorkspaceLayoutEntry\(key\)\s*\{\s*return WORKSPACE_LAYOUT_KEYS\.includes\(key\);\s*\}/);
+  assert.match(app, /if \(isWorkspaceLayoutEntry\(key\)\) el\.hidden = !visible\.has\(key\);/);
+  assert.match(app, /ccPersonalWorkspaceForm[\s\S]{0,700}state\.workspaceSettings = await PUT[\s\S]{0,300}applyWorkspaceSettings\(\)/);
+  assert.match(app, /ccRestoreDepartmentWorkspace[\s\S]{0,700}state\.workspaceSettings = await DELETE[\s\S]{0,300}applyWorkspaceSettings\(\)/);
+  assert.match(index, /data-workspace="org"/);
+  assert.match(index, /app\.js\?v=107/);
+});

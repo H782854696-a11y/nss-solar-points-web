@@ -173,6 +173,12 @@ function workspaceItemLabel(key) {
   const labels = { overview: ccText('Control Platform', '中控平台'), approvals: ccText('Approval Center', '审批中心'), collaboration: ccText('Tasks & notifications', '任务协作'), storeops: ccText('Store follow-up', '门店跟进'), purchasing: ccText('Order Progress', '跟单进度'), announcements: ccText('Announcements', '内容公告') };
   return labels[key] || key;
 }
+// Workspace layouts control only the six configurable business workspaces.
+// Static navigation (for example, the RBAC-gated organisation directory) must
+// retain the visibility established by the normal navigation permission pass.
+function isWorkspaceLayoutEntry(key) {
+  return WORKSPACE_LAYOUT_KEYS.includes(key);
+}
 function applyWorkspaceSettings() {
   const settings = state.workspaceSettings?.effectiveSettings;
   if (!settings) return;
@@ -181,7 +187,9 @@ function applyWorkspaceSettings() {
   // Visibility is a display preference only. Existing RBAC gates remain the
   // final authority, so this cannot reveal an unauthorized feature.
   const navItems = new Map($$('[data-workspace]').map(el => [el.dataset.workspace, el]));
-  navItems.forEach((el, key) => { el.hidden = !visible.has(key); });
+  navItems.forEach((el, key) => {
+    if (isWorkspaceLayoutEntry(key)) el.hidden = !visible.has(key);
+  });
 }
 
 /** 登录页密码「显示/隐藏」切换（纯 UI，不改认证逻辑；loading 态只作用于 #loginSubmit） */
@@ -723,6 +731,11 @@ async function workflowImages(form) {
   if (files.length > 10 || files.some(x => !['image/png','image/jpeg'].includes(uploadMimeType(x)) || x.size > 4 * 1024 * 1024) || files.reduce((sum,x) => sum + x.size, 0) > 10 * 1024 * 1024) throw new Error(ccText('Use up to 10 PNG/JPG images, 4 MB each and 10 MB total.', '请上传 PNG/JPG 图片，最多 10 张，每张不超过 4MB，本次合计不超过 10MB。'));
   return Promise.all(files.map(async file => ({ fileName: file.name, mimeType: uploadMimeType(file), data: await readFileAsDataUrl(file, uploadMimeType(file)) })));
 }
+async function announcementImages(files) {
+  const selected = Array.from(files || []);
+  if (selected.length > 10 || selected.some(file => !['image/png', 'image/jpeg'].includes(uploadMimeType(file)) || file.size > 4 * 1024 * 1024) || selected.reduce((sum, file) => sum + file.size, 0) > 10 * 1024 * 1024) throw new Error(ccText('Use up to 10 PNG/JPG images, 4 MB each and 10 MB total.', '请上传 PNG/JPG 图片，最多 10 张，每张不超过 4MB，本次合计不超过 10MB。'));
+  return Promise.all(selected.map(async file => ({ fileName: file.name, mimeType: uploadMimeType(file), data: await readFileAsDataUrl(file, uploadMimeType(file)) })));
+}
 function bindWorkflowFields(form) {
   const sync = () => {
     const exception = form.elements.exceptionReason;
@@ -977,6 +990,7 @@ function renderAnnouncementList(items) {
           <span class="cc-status cc-status-${tone}"><i></i>${escapeHtml(statusLabel)}</span>
         </div>
         <p>${escapeHtml(item.body || '').replace(/\n/g, '<br>')}</p>
+        ${(item.attachments || []).length ? `<div class="cc-announcement-images" aria-label="${escapeHtml(ccText('Announcement images', '公告图片'))}">${item.attachments.map(attachment => `<button type="button" class="cc-announcement-image" data-announcement-image-preview="${escapeHtml(item.id)}:${escapeHtml(attachment.id)}" aria-label="${escapeHtml(ccText('Preview announcement image', '预览公告图片'))}: ${escapeHtml(attachment.name)}"><img src="/api/v2/announcements/${encodeURIComponent(item.id)}/attachments/${encodeURIComponent(attachment.id)}/preview" alt="${escapeHtml(attachment.name)}" loading="lazy"/></button>`).join('')}</div>` : ''}
         <div class="cc-meta">${escapeHtml(item.createdByName || '')} · ${escapeHtml(new Date(item.updatedAt || item.createdAt).toLocaleString())}${item.expiresAt ? ` · ${ccText('Expires', '到期')} ${escapeHtml(new Date(item.expiresAt).toLocaleDateString())}` : ''}</div>
         ${can('announcement.manage') ? `<div class="cc-ann-item-actions"><button type="button" class="btn btn-sm" data-cc-announcement-edit="${escapeHtml(item.id)}">${ccText('Edit', '编辑')}</button></div>` : ''}
       </article>`;
@@ -1121,6 +1135,13 @@ async function renderControlCenter(root) {
     return `${Math.floor(diff / 86400000)} ${ccText('d ago', '天前')}`;
   };
   const assignees = assigneeData.items || [];
+  const taskAssigneeField = state.me?.role === 'admin' ? 'assigneeEmployeeId' : 'assigneeId';
+  const taskAssigneeOption = (candidate, selectedAccountId = '') => {
+    if (!candidate.employeeId) return `<option value="${escapeHtml(candidate.id)}" ${candidate.id === selectedAccountId ? 'selected' : ''}>${escapeHtml(candidate.name)}${candidate.username ? ` · ${escapeHtml(candidate.username)}` : ''}</option>`;
+    const label = [candidate.name, candidate.departmentName].filter(Boolean).join(' · ') || ccText('Unnamed employee', '未命名员工');
+    const unavailable = candidate.selectable === false;
+    return `<option value="${escapeHtml(candidate.employeeId)}" ${candidate.accountId === selectedAccountId ? 'selected' : ''} ${unavailable ? 'disabled' : ''}>${escapeHtml(label)}${unavailable ? ` · ${escapeHtml(candidate.reason || ccText('Unavailable', '不可选'))}` : ''}</option>`;
+  };
   const storeReports = operationData.reports || [], storeInspections = operationData.inspections || [], storeIssues = operationData.issues || [];
   const purchaseItems = purchaseData.items || [], purchaseTotal = Number(purchaseData.total || 0);
   const purchaseOffset = Number(purchaseData.offset || 0), purchaseLimit = Number(purchaseData.limit || 20);
@@ -1363,7 +1384,7 @@ async function renderControlCenter(root) {
       <div class="cc-list" data-cc-ann-list>${renderAnnouncementList(announcements)}</div>
     </section>
     ${can('workflow.create') ? `<section class="card cc-section" data-cc-area="collaboration"><h3>${ccText('New request', '新建申请')}</h3><form id="ccWorkflowForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Process type', '流程类型')}</span><select name="type">${Object.entries(CREATABLE_CONTROL_TYPES).map(([k,v]) => `<option value="${k}">${escapeHtml(v[String(locale()).toLowerCase().startsWith('zh') ? 1 : 0])}</option>`).join('')}</select></label><div id="ccWorkflowFields" class="cc-form-grid cc-wide">${renderWorkflowFields(initialProcessType)}</div><div id="ccWorkflowPhotos" class="cc-wide">${workflowPhotoField(initialProcessType)}</div></div><button class="btn btn-primary" type="submit">${ccText('Submit for approval', '提交审批')}</button></form></section>` : ''}
-    ${can('task.create') ? `<section class="card cc-section" data-cc-area="collaboration"><h3>${ccText('Create task', '创建任务')}</h3><form id="ccTaskForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Task title', '任务名称')}</span><input name="title" required maxlength="180"/></label><label class="cc-field"><span>${ccText('Assignee', '负责人')}</span><select name="assigneeId"><option value="">${ccText('Unassigned', '暂不指派')}</option>${assignees.map(a => `<option value="${escapeHtml(a.id)}">${escapeHtml(a.name)}${a.username ? ` · ${escapeHtml(a.username)}` : ''}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">—</option>${stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Due date', '截止日期')}</span><input name="dueAt" type="date"/></label><label class="cc-field"><span>${ccText('Priority', '优先级')}</span><select name="priority"><option value="normal">${ccText('Normal', '普通')}</option><option value="high">${ccText('High', '高')}</option><option value="urgent">${ccText('Urgent', '紧急')}</option><option value="low">${ccText('Low', '低')}</option></select></label><label class="cc-field cc-wide"><span>${ccText('Description', '任务说明')}</span><textarea name="description" rows="2"></textarea></label><label class="cc-field cc-wide"><span>${ccText('Checklist (one item per line)', '执行清单（每行一项）')}</span><textarea name="checklist" rows="4" maxlength="12000" placeholder="${ccText('Prepare materials\nConfirm completion\nUpload evidence', '准备资料\n确认完成情况\n上传凭证')}"></textarea></label></div><button class="btn btn-primary" type="submit">${ccText('Create task', '创建任务')}</button></form></section>` : ''}
+    ${can('task.create') ? `<section class="card cc-section" data-cc-area="collaboration"><h3>${ccText('Create task', '创建任务')}</h3><form id="ccTaskForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Task title', '任务名称')}</span><input name="title" required maxlength="180"/></label><label class="cc-field"><span>${ccText('Assignee', '负责人')}</span><select name="${taskAssigneeField}"><option value="">${ccText('Unassigned', '暂不指派')}</option>${assignees.map(taskAssigneeOption).join('')}</select>${state.me?.role === 'admin' ? `<small class="cc-meta">${ccText('Only active employees with one authorized login account can be assigned.', '仅可指派已关联唯一有效登录账号的在职员工。')}</small>` : ''}</label><label class="cc-field"><span>${ccText('Store', '门店')}</span><select name="storeId"><option value="">—</option>${stores.map(s => `<option value="${escapeHtml(s.id)}">${escapeHtml(tStore(s.name))}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Due date', '截止日期')}</span><input name="dueAt" type="date"/></label><label class="cc-field"><span>${ccText('Priority', '优先级')}</span><select name="priority"><option value="normal">${ccText('Normal', '普通')}</option><option value="high">${ccText('High', '高')}</option><option value="urgent">${ccText('Urgent', '紧急')}</option><option value="low">${ccText('Low', '低')}</option></select></label><label class="cc-field cc-wide"><span>${ccText('Description', '任务说明')}</span><textarea name="description" rows="2"></textarea></label><label class="cc-field cc-wide"><span>${ccText('Checklist (one item per line)', '执行清单（每行一项）')}</span><textarea name="checklist" rows="4" maxlength="12000" placeholder="${ccText('Prepare materials\nConfirm completion\nUpload evidence', '准备资料\n确认完成情况\n上传凭证')}"></textarea></label></div><button class="btn btn-primary" type="submit">${ccText('Create task', '创建任务')}</button></form></section>` : ''}
     ${mayViewOrg ? `<section class="cc-section" data-cc-area="org"></section>` : ''}
     ${mayViewOrg ? `<section class="card cc-section" data-cc-area="org"><h3>${ccText('Regions and stores', '区域与门店')}</h3><p class="cc-meta">${ccText('Regions group stores for scope control.', '按区域展开查看门店，区域范围继续用于现有数据权限。')}</p><div class="cc-org-tree cc-region-tree">${orgRegions.length ? orgRegions.map(region => { const regionStores = stores.filter(store => store.regionId === region.id); return `<details open><summary><span class="cc-tree-folder">▾</span><strong>${escapeHtml(region.name)}</strong><small>${escapeHtml(region.code)} · ${regionStores.length} ${ccText('stores', '家门店')}</small></summary><div class="cc-tree-children">${regionStores.length ? regionStores.map(store => `<div class="cc-tree-store"><strong>${escapeHtml(tStore(store.name))}</strong><small>${escapeHtml(store.code || store.city || '')}</small></div>`).join('') : `<div class="cc-muted">${ccText('No stores assigned', '暂无门店')}</div>`}</div></details>`; }).join('') : `<span class="cc-muted">${ccText('No regions configured yet', '尚未配置区域')}</span>`}${stores.some(store => !store.regionId || !orgRegions.some(region => region.id === store.regionId)) ? `<details><summary><span class="cc-tree-folder">▸</span><strong>${ccText('Stores without a region', '未关联区域的门店')}</strong><small>${stores.filter(store => !store.regionId || !orgRegions.some(region => region.id === store.regionId)).length}</small></summary><div class="cc-tree-children">${stores.filter(store => !store.regionId || !orgRegions.some(region => region.id === store.regionId)).map(store => `<div class="cc-tree-store"><strong>${escapeHtml(tStore(store.name))}</strong><small>${escapeHtml(store.code || store.city || '')}</small></div>`).join('')}</div></details>` : ''}</div></section>` : ''}
     ${can('staff.view') ? `<section class="card cc-section" data-cc-area="governance"><h3>${ccText('Employee directory', '员工名册')}</h3>${employees.length ? employees.map(x => `<span class="cc-chip">${escapeHtml(x.employeeCode)} · ${escapeHtml(x.name)}${x.positionId ? ` · ${escapeHtml(positions.find(p => p.id === x.positionId)?.name || '')}` : ''} ${can('staff.edit') ? `<button type="button" class="btn btn-sm" data-v2-edit-employee="${escapeHtml(x.id)}">${ccText('Edit', '编辑')}</button>` : ''}</span>`).join('') : `<span class="cc-muted">${ccText('No employee records configured yet', '尚无员工名册')}</span>`}${can('staff.create') ? `<form id="ccEmployeeForm" class="cc-inline-form"><input name="employeeCode" required placeholder="EMP-001"/><input name="name" required placeholder="${ccText('Employee name', '员工姓名')}"/><select name="positionId"><option value="">${ccText('No position', '未指定职位')}</option>${positions.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)}</option>`).join('')}</select><input name="phone" placeholder="${ccText('Phone', '电话')}"/><button class="btn btn-sm btn-primary">${ccText('Add', '添加')}</button></form>` : ''}</section>` : ''}
@@ -1545,17 +1566,42 @@ async function renderControlCenter(root) {
     if (!can('announcement.manage')) return;
     const modal = openModal({
       title: ccText('New announcement', '新建公告'),
-      body: `<form id="ccAnnouncementCreate" class="cc-form-grid"><label class="cc-field"><span>${ccText('Title', '标题')} *</span><input name="title" required maxlength="180" autofocus/></label><label class="cc-field"><span>${ccText('Content', '内容')} *</span><textarea name="body" required maxlength="5000" rows="6"></textarea></label><input type="hidden" name="status" value="published"/><label class="cc-inline-check cc-wide"><input name="pinned" type="checkbox"/> ${ccText('Pin to ticker', '置顶到公告条')}</label></form>`,
-      footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccAnnouncementCreateSave">${ccText('Publish announcement', '发布公告')}</button>`
+      body: `<form id="ccAnnouncementCreate" class="cc-form-grid"><label class="cc-field"><span>${ccText('Title', '标题')} *</span><input name="title" required maxlength="180" autofocus/></label><label class="cc-field"><span>${ccText('Content', '内容')} *</span><textarea name="body" required maxlength="5000" rows="6"></textarea></label><label class="cc-field cc-wide cc-announcement-attachment-field"><span>${ccText('Image attachments (optional)', '图片附件（选填）')}</span><input name="images" type="file" multiple accept="image/png,image/jpeg,.png,.jpg,.jpeg"/><small>${ccText('PNG / JPG · up to 10 images · 4 MB each · 10 MB total', 'PNG / JPG · 最多 10 张 · 每张不超过 4MB · 本次合计不超过 10MB')}</small><span class="cc-announcement-draft-images" data-announcement-draft-images></span></label><input type="hidden" name="status" value="published"/><label class="cc-inline-check cc-wide"><input name="pinned" type="checkbox"/> ${ccText('Pin to ticker', '置顶到公告条')}</label></form>`,
+      footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccAnnouncementCreateSave">${ccText('Publish announcement', '发布公告')}</button>`,
+      wide: true,
     });
     const form = $('#ccAnnouncementCreate', modal);
     const save = $('#ccAnnouncementCreateSave', modal);
+    const fileInput = form.elements.images;
+    const draftImages = $('[data-announcement-draft-images]', form);
+    let selectedImages = [], objectUrls = [];
+    const renderDraftImages = () => {
+      for (const url of objectUrls) URL.revokeObjectURL(url);
+      objectUrls = selectedImages.map(file => URL.createObjectURL(file));
+      draftImages.innerHTML = selectedImages.map((file, index) => `<span class="cc-announcement-draft-image"><img src="${objectUrls[index]}" alt="${escapeHtml(file.name)}"/><button type="button" class="btn btn-sm" data-announcement-image-remove="${index}" aria-label="${escapeHtml(ccText('Remove image', '移除图片'))}">×</button><small>${escapeHtml(file.name)}</small></span>`).join('');
+    };
+    modal._cleanup = () => { for (const url of objectUrls) URL.revokeObjectURL(url); };
+    fileInput.addEventListener('change', () => {
+      const next = [...selectedImages, ...Array.from(fileInput.files || [])];
+      try {
+        const total = next.reduce((sum, file) => sum + file.size, 0);
+        if (next.length > 10 || next.some(file => !['image/png', 'image/jpeg'].includes(uploadMimeType(file)) || file.size > 4 * 1024 * 1024) || total > 10 * 1024 * 1024) throw new Error(ccText('Use up to 10 PNG/JPG images, 4 MB each and 10 MB total.', '请上传 PNG/JPG 图片，最多 10 张，每张不超过 4MB，本次合计不超过 10MB。'));
+        selectedImages = next; renderDraftImages();
+      } catch (error) { toast(error.message, 'error'); }
+      fileInput.value = '';
+    });
+    draftImages.addEventListener('click', event => {
+      const remove = event.target.closest('[data-announcement-image-remove]');
+      if (!remove) return;
+      selectedImages.splice(Number(remove.dataset.announcementImageRemove), 1);
+      renderDraftImages();
+    });
     form.addEventListener('submit', event => { event.preventDefault(); save.click(); });
     save.addEventListener('click', async () => {
       if (!form.reportValidity()) return;
       const data = new FormData(form);
       save.disabled = true;
-      try { await POST('/api/v2/announcements', { title: String(data.get('title') || '').trim(), body: String(data.get('body') || '').trim(), pinned: data.has('pinned'), status: data.get('status') }); closeModal(); toast(ccText('Announcement saved', '公告已保存'), 'success'); await renderControlCenter(root); }
+      try { await POST('/api/v2/announcements', { title: String(data.get('title') || '').trim(), body: String(data.get('body') || '').trim(), pinned: data.has('pinned'), status: data.get('status'), images: await announcementImages(selectedImages) }); closeModal(); toast(ccText('Announcement saved', '公告已保存'), 'success'); await renderControlCenter(root); }
       catch (error) { save.disabled = false; toast(error.message, 'error'); }
     });
     form.elements.title.focus();
@@ -1569,6 +1615,20 @@ async function renderControlCenter(root) {
   const annSearch = $('[data-cc-ann-search]', root);
   if (annSearch) { let timer = null; annSearch.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { ccAnnQuery = annSearch.value; refreshAnnList(); }, 180); }); }
   $('[data-cc-ann-sort]', root)?.addEventListener('change', event => { ccAnnSort = event.target.value; refreshAnnList(); });
+  $$('[data-announcement-image-preview]', root).forEach(button => button.addEventListener('click', async () => {
+    const [announcementId, attachmentId] = String(button.dataset.announcementImagePreview || '').split(':');
+    if (!announcementId || !attachmentId) return;
+    button.disabled = true;
+    try {
+      const response = await fetch(`/api/v2/announcements/${encodeURIComponent(announcementId)}/attachments/${encodeURIComponent(attachmentId)}/preview`, { credentials: 'same-origin' });
+      const type = String(response.headers.get('content-type') || '').split(';')[0].toLowerCase();
+      if (!response.ok || !['image/png', 'image/jpeg'].includes(type)) throw new Error(ccText('Image preview is unavailable. It may have expired or you may no longer have access.', '图片预览不可用。图片可能已失效，或您已没有访问权限。'));
+      const objectUrl = URL.createObjectURL(await response.blob());
+      const modal = openModal({ title: ccText('Announcement image', '公告图片'), wide: true, body: `<div class="cc-attachment-preview"><img style="max-width:100%;height:auto" src="${objectUrl}" alt="${ccText('Announcement image', '公告图片')}"/></div>`, footer: `<button class="btn" data-close>${ccText('Close', '关闭')}</button>` });
+      modal._cleanup = () => URL.revokeObjectURL(objectUrl);
+    } catch (error) { toast(error.message, 'error'); }
+    finally { button.disabled = false; }
+  }));
   $$('[data-cc-announcement-edit]', root).forEach(button => button.addEventListener('click', () => { const item = announcements.find(x => x.id === button.dataset.ccAnnouncementEdit); if (!item) return; const modal = openModal({ title: ccText('Edit announcement','编辑公告'), body: `<form id="ccAnnouncementEdit" class="cc-form-grid"><label class="cc-field"><span>${ccText('Title','标题')}</span><input name="title" required maxlength="180" value="${escapeHtml(item.title)}"/></label><label class="cc-field"><span>${ccText('Content','内容')}</span><textarea name="body" required maxlength="5000" rows="5">${escapeHtml(item.body)}</textarea></label><label class="cc-inline-check cc-wide"><input name="pinned" type="checkbox" ${item.pinned ? 'checked' : ''}/> ${ccText('Pin to ticker','置顶到公告条')}</label><label class="cc-field cc-wide"><span>${ccText('Status', '状态')}</span><select name="status"><option value="published" ${item.status === 'published' ? 'selected' : ''}>${ccText('Published','已发布')}</option><option value="archived">${ccText('Archive','归档')}</option></select></label></form>`, footer: `<button class="btn" data-close>${ccText('Cancel','取消')}</button><button class="btn btn-primary" id="ccAnnouncementUpdate">${ccText('Save','保存')}</button>` }); $('#ccAnnouncementUpdate', modal).addEventListener('click', async () => { const form = $('#ccAnnouncementEdit', modal); if (!form.reportValidity()) return; const data = new FormData(form); try { await PUT(`/api/v2/announcements/${encodeURIComponent(item.id)}`, { title: data.get('title'), body: data.get('body'), pinned: data.has('pinned'), status: data.get('status') }); closeModal(); await renderControlCenter(root); } catch(error) { toast(error.message, 'error'); } }); }));
   root.setWorkspace = setWorkspace;
   root.stopPurchasePolling = stopPurchasePolling;
@@ -1755,7 +1815,7 @@ async function renderControlCenter(root) {
     const options = PURCHASE_STAGES.map((s, i) => `<option value="${escapeHtml(s)}" ${i === currentIndex ? 'selected' : ''} ${i < currentIndex ? 'disabled' : ''}>${escapeHtml(purchaseStageLabel(s))}</option>`).join('');
     const modal = openModal({
       title: `${ccText('Update shipping status', '更新物流进度')} · ${record.orderNo || ''}`,
-      body: `<div class="cc-form-grid">
+      body: `<form id="ccPurchaseUpdate" class="cc-form-grid">
         <label class="cc-field cc-wide"><span>${ccText('Shipping stage', '物流阶段')}</span><select name="stage">${options}</select></label>
         <label class="cc-field"><span>${ccText('Vessel', '船名')}</span><input name="vessel" value="${escapeHtml(record.vessel || '')}"/></label>
         <label class="cc-field"><span>${ccText('B/L number', '提单号')}</span><input name="blNo" value="${escapeHtml(record.blNo || '')}"/></label>
@@ -1765,23 +1825,27 @@ async function renderControlCenter(root) {
         <label class="cc-field cc-wide"><span>${ccText('What changed', '本次进展说明')}</span><input name="stageNote" placeholder="${ccText('e.g. vessel departed Xiamen, ETA shifted', '例如：船已离开厦门，预计到港顺延')}"/></label>
         <label class="cc-field cc-wide"><span>${ccText('Note', '备注')}</span><textarea name="note" rows="2">${escapeHtml(record.note || '')}</textarea></label>
         <label class="cc-field cc-wide"><span>${ccText('Evidence (PDF/PNG/JPG, up to 4 MB each)', '凭证（PDF/PNG/JPG，每个不超过 4MB）')}</span><input name="attachments" type="file" multiple accept="application/pdf,image/png,image/jpeg"/></label>
-      </div>`,
+      </form>`,
       footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccPurchaseSave">${ccText('Save', '保存')}</button>`,
       wide: true,
     });
-    $('#ccPurchaseSave', modal).addEventListener('click', async () => {
-      const fd = new FormData($('form', modal) || document.createElement('form'));
+    const form = $('#ccPurchaseUpdate', modal);
+    const save = $('#ccPurchaseSave', modal);
+    form.addEventListener('submit', event => { event.preventDefault(); save.click(); });
+    save.addEventListener('click', async () => {
+      const fd = new FormData(form);
       let files = [];
       try { files = validateStoreOperationFiles(fd.getAll('attachments')); } catch (err) { toast(err.message, 'error'); return; }
       const payload = {};
       for (const [key, value] of fd.entries()) if (key !== 'attachments') payload[key] = value;
+      save.disabled = true;
       try {
         await POST(`/api/v2/purchase-shipments/${encodeURIComponent(record.id)}`, payload);
         await uploadPurchaseFiles(record.id, files);
         closeModal();
         toast(ccText('Shipping status updated', '物流进度已更新'), 'success');
         await renderControlCenter(root);
-      } catch (err) { toast(err.message, 'error'); }
+      } catch (err) { save.disabled = false; toast(err.message, 'error'); }
     });
   }));
   $$('[data-purchase-file]', root).forEach(button => button.addEventListener('click', () => {
@@ -2037,7 +2101,7 @@ async function renderControlCenter(root) {
   $$('[data-deposit-open]', root).forEach(btn => btn.addEventListener('click', () => setScreen('dailyDeposits')));
   $$('[data-task-edit]', root).forEach(btn => btn.addEventListener('click', () => {
     const task = tasks.find(x => x.id === btn.dataset.taskEdit); if (!task) return;
-    const modal = openModal({ title: ccText('Edit task', '编辑任务'), body: `<form id="ccTaskEdit" class="cc-form-grid"><label class="cc-field cc-wide"><span>${ccText('Task title', '任务名称')}</span><input name="title" required maxlength="180" value="${escapeHtml(task.title)}"/></label><label class="cc-field"><span>${ccText('Priority', '优先级')}</span><select name="priority">${[['low','低'],['normal','普通'],['high','高'],['urgent','紧急']].map(([v,l]) => `<option value="${v}" ${v === task.priority ? 'selected' : ''}>${ccText(v, l)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Due date', '截止日期')}</span><input type="date" name="dueAt" value="${escapeHtml(task.dueAt ? task.dueAt.slice(0,10) : '')}"/></label><label class="cc-field"><span>${ccText('Status', '状态')}</span><select name="status"><option value="open" ${task.status === 'open' ? 'selected' : ''}>${ccText('Open', '待处理')}</option><option value="in_progress" ${task.status === 'in_progress' ? 'selected' : ''}>${ccText('In progress', '进行中')}</option></select></label>${can('task.assign') ? `<label class="cc-field"><span>${ccText('Assignee', '负责人')}</span><select name="assigneeId"><option value="">${ccText('Unassigned', '暂不指派')}</option>${assignees.map(a => `<option value="${escapeHtml(a.id)}" ${a.id === task.assigneeId ? 'selected' : ''}>${escapeHtml(a.name)}</option>`).join('')}</select></label>` : ''}<label class="cc-field cc-wide"><span>${ccText('Description', '任务说明')}</span><textarea name="description" rows="3">${escapeHtml(task.description || '')}</textarea></label></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccTaskSave">${ccText('Save', '保存')}</button>`, wide: true });
+    const modal = openModal({ title: ccText('Edit task', '编辑任务'), body: `<form id="ccTaskEdit" class="cc-form-grid"><label class="cc-field cc-wide"><span>${ccText('Task title', '任务名称')}</span><input name="title" required maxlength="180" value="${escapeHtml(task.title)}"/></label><label class="cc-field"><span>${ccText('Priority', '优先级')}</span><select name="priority">${[['low','低'],['normal','普通'],['high','高'],['urgent','紧急']].map(([v,l]) => `<option value="${v}" ${v === task.priority ? 'selected' : ''}>${ccText(v, l)}</option>`).join('')}</select></label><label class="cc-field"><span>${ccText('Due date', '截止日期')}</span><input type="date" name="dueAt" value="${escapeHtml(task.dueAt ? task.dueAt.slice(0,10) : '')}"/></label><label class="cc-field"><span>${ccText('Status', '状态')}</span><select name="status"><option value="open" ${task.status === 'open' ? 'selected' : ''}>${ccText('Open', '待处理')}</option><option value="in_progress" ${task.status === 'in_progress' ? 'selected' : ''}>${ccText('In progress', '进行中')}</option></select></label>${can('task.assign') ? `<label class="cc-field"><span>${ccText('Assignee', '负责人')}</span><select name="${taskAssigneeField}"><option value="">${ccText('Unassigned', '暂不指派')}</option>${assignees.map(candidate => taskAssigneeOption(candidate, task.assigneeId)).join('')}</select></label>` : ''}<label class="cc-field cc-wide"><span>${ccText('Description', '任务说明')}</span><textarea name="description" rows="3">${escapeHtml(task.description || '')}</textarea></label></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccTaskSave">${ccText('Save', '保存')}</button>`, wide: true });
     $('#ccTaskSave', modal).addEventListener('click', async () => { const fd = new FormData($('#ccTaskEdit', modal)); const payload = Object.fromEntries(fd.entries()); if (!can('task.assign')) delete payload.assigneeId; try { await PUT(`/api/v2/tasks/${encodeURIComponent(task.id)}`, payload); closeModal(); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } });
   }));
   $$('[data-notice-read]', root).forEach(btn => btn.addEventListener('click', async () => { try { await POST(`/api/v2/notifications/${encodeURIComponent(btn.dataset.noticeRead)}/read`, {}); await renderControlCenter(root); } catch (err) { toast(err.message, 'error'); } }));

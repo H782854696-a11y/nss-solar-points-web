@@ -1153,6 +1153,10 @@ function controlVisible(req, permission, item) {
   const currentUser = getSessionUser(req);
   if (!currentUser || !item || !rbac.hasPermission(currentUser, permission)) return false;
   if (permission === 'workflow.view' && item.type === 'store_remediation' && item.assigneeId === currentUser.id) return true;
+  // A task assignee with a self-scoped task permission can work only on the
+  // exact task addressed to them, even when it belongs to another store.  This
+  // does not grant task listing/search outside that one task or any store data.
+  if (['task.view', 'task.edit', 'task.close'].includes(permission) && item.assigneeId === currentUser.id && rbac.permScope(currentUser, permission) === 'self') return true;
   // This helper receives an exact permission (for example workflow.view).
   // scopeOf expects a resource prefix, so use can() to apply that permission's actual scope.
   if (rbac.permScope(currentUser, permission) === 'self' && item.userId && (item.userId === currentUser.id || item.userId === currentUser.employeeId)) return true;
@@ -1422,6 +1426,57 @@ function workflowApproverIdentity(employeeId, users = readAll('users') || [], em
   if (user.disabled) return { employee, user, reason: '关联账号已停用' };
   if (rbac.normalizeRole(user.role) === 'pending_authorization') return { employee, user, reason: '关联账号尚未授权' };
   return { employee, user, reason: null };
+}
+// A task is addressed to an employee record, then resolved server-side to the
+// one current login account.  Never accept a browser-supplied account id for
+// the administrator's all-company assignment path: old/broken links must not
+// silently send work to a different person.
+function taskAssigneeIdentity(employeeId, users = readAll('users') || [], employees = readAll('employees') || []) {
+  const identity = workflowApproverIdentity(employeeId, users, employees);
+  if (identity.reason) return identity;
+  if (!rbac.hasPermission(identity.user, 'task.view') || !rbac.hasPermission(identity.user, 'task.close')) {
+    return { ...identity, reason: '关联账号没有办理任务的权限' };
+  }
+  return identity;
+}
+function isAllCompanyTaskAssigner(user) {
+  return rbac.normalizeRole(user?.role) === 'admin';
+}
+function taskAssigneeCandidate(req, actor, employee, users, employees) {
+  const identity = taskAssigneeIdentity(employee.id, users, employees);
+  if (identity.reason) return identity;
+  if (isAllCompanyTaskAssigner(actor)) return identity;
+  const assignment = rbac.canAssign(actor, identity.user, 'task');
+  if (!assignment.ok) return { ...identity, reason: assignment.reason || '无权指派该人员' };
+  if (!controlVisible(req, 'task.assign', { storeId: identity.user.storeId, regionId: identity.user.regionId, country: identity.user.country || null, createdBy: identity.user.id })) {
+    return { ...identity, reason: '该人员不在你的任务指派范围内' };
+  }
+  return identity;
+}
+function taskAssigneeForRequest(req, actor, rawEmployeeId, legacyUserId, resource) {
+  const users = readAll('users') || [], employees = readAll('employees') || [];
+  if (rawEmployeeId !== undefined) {
+    const employeeId = controlCenter.cleanText(rawEmployeeId, 100);
+    if (!employeeId) return { user: null };
+    const identity = taskAssigneeIdentity(employeeId, users, employees);
+    if (identity.reason) return { error: `负责人不可选：${identity.reason}` };
+    if (!isAllCompanyTaskAssigner(actor)) {
+      const assignment = rbac.canAssign(actor, identity.user, 'task');
+      if (!assignment.ok) return { error: assignment.reason || '无权指派给该负责人', forbidden: true };
+      if (!controlVisible(req, 'task.assign', { ...resource, createdBy: actor.id })) return { error: '无权在该范围指派负责人', forbidden: true };
+    }
+    return { user: identity.user, employee: identity.employee };
+  }
+  // Compatibility for non-admin callers that still use the historic user-id
+  // payload.  Admin UI/API must use employee ids so an account cannot be
+  // substituted for a similarly named employee.
+  if (!legacyUserId) return { user: null };
+  if (isAllCompanyTaskAssigner(actor)) return { error: '管理员必须使用员工档案指定负责人' };
+  const user = users.find(x => x.id === legacyUserId && !x.disabled);
+  if (!user) return { error: '负责人账号不存在或已停用' };
+  const assignment = rbac.canAssign(actor, user, 'task');
+  if (!assignment.ok) return { error: assignment.reason || '无权指派给该账号', forbidden: true };
+  return { user };
 }
 // Frozen, per-instance access for a named current approver. It grants no role
 // and cannot reveal another workflow. Country remains fail-closed; cross-team
@@ -2673,8 +2728,28 @@ app.get('/api/v2/purchase-shipments/:id/attachments/:attachmentId/download', (re
 });
 app.get('/api/v2/task-assignees', (req, res) => {
   if (!guard.checkPerm(req, res, 'task.assign')) return;
-  const actor = getSessionUser(req);  const users = (readAll('users') || []).filter(x => !x.disabled && rbac.canAssign(actor, x, 'task').ok).filter(x => controlVisible(req, 'task.assign', { storeId: x.storeId, country: 'PH', createdBy: x.id }));
-  res.json({ items: users.map(x => ({ id: x.id, name: x.name || x.username, username: x.username, storeId: x.storeId || null })) });
+  const actor = getSessionUser(req), users = readAll('users') || [], employees = readAll('employees') || [], departments = readAll('departments') || [];
+  // Preserve the established non-admin assignment contract.  The explicit
+  // all-company exception is administrator-only and is deliberately the only
+  // path that accepts employee ids instead of account ids.
+  if (!isAllCompanyTaskAssigner(actor)) {
+    const items = users.filter(user => !user.disabled && rbac.canAssign(actor, user, 'task').ok)
+      .filter(user => controlVisible(req, 'task.assign', { storeId: user.storeId, regionId: user.regionId, country: user.country || null, createdBy: user.id }))
+      .map(user => ({ id: user.id, name: user.name || user.username, username: user.username, storeId: user.storeId || null }));
+    return res.json({ items });
+  }
+  const items = employees.filter(employee => employee.active !== false).map(employee => {
+    const candidate = taskAssigneeCandidate(req, actor, employee, users, employees);
+    return {
+      employeeId: employee.id,
+      name: employee.name,
+      departmentName: departments.find(x => x.id === employee.departmentId)?.name || '',
+      accountId: candidate.user?.id || null,
+      selectable: !candidate.reason,
+      reason: candidate.reason || null,
+    };
+  });
+  res.json({ items });
 });
 app.get('/api/v2/alert-assignees', (req, res) => {
   if (!guard.checkPerm(req, res, 'alert.assign')) return;
@@ -2696,12 +2771,11 @@ app.post('/api/v2/tasks', (req, res) => {
   const taskResource = { storeId, warehouseId: null, regionId: linkedStore?.regionId || null, country: taskCountry, createdBy: u.id };
   if (!guard.check(req, res, 'task.create', taskResource)) return;
   let assignee = null;
-  if (b.assigneeId) {
+  if (b.assigneeEmployeeId !== undefined || b.assigneeId !== undefined) {
     if (!guard.check(req, res, 'task.assign', { storeId, country: taskCountry, createdBy: u.id })) return;
-    assignee = (readAll('users') || []).find(x => x.id === b.assigneeId && !x.disabled);
-    if (!assignee) return res.status(400).json({ error: '负责人账号不存在或已停用' });
-    const assignment = rbac.canAssign(u, assignee, 'task');
-    if (!assignment.ok) return res.status(403).json({ error: assignment.reason || '无权指派给该账号' });
+    const resolved = taskAssigneeForRequest(req, u, b.assigneeEmployeeId, b.assigneeId, taskResource);
+    if (resolved.error) return res.status(resolved.forbidden ? 403 : 400).json({ error: resolved.error });
+    assignee = resolved.user;
   }
   const dueAt = parseControlDueDate(b.dueAt);
   if (dueAt && !Number.isFinite(dueAt.getTime())) return res.status(400).json({ error: '截止日期无效' });
@@ -2777,14 +2851,11 @@ app.put('/api/v2/tasks/:id', (req, res) => {
     if (item.status !== b.status) item.overdueReminderAt = null;
     item.status = b.status;
   }
-  if (b.assigneeId !== undefined) {
+  if (b.assigneeEmployeeId !== undefined || b.assigneeId !== undefined) {
     if (!guard.check(req, res, 'task.assign', item)) return;
-    const assignee = b.assigneeId ? (readAll('users') || []).find(x => x.id === b.assigneeId && !x.disabled) : null;
-    if (b.assigneeId && !assignee) return res.status(400).json({ error: '负责人账号不存在或已停用' });
-    if (assignee) {
-      const assignment = rbac.canAssign(u, assignee, 'task');
-      if (!assignment.ok) return res.status(403).json({ error: assignment.reason || '无权指派给该账号' });
-    }
+    const resolved = taskAssigneeForRequest(req, u, b.assigneeEmployeeId, b.assigneeId, item);
+    if (resolved.error) return res.status(resolved.forbidden ? 403 : 400).json({ error: resolved.error });
+    const assignee = resolved.user;
     if (item.assigneeId !== (assignee?.id || null)) item.overdueReminderAt = null;
     item.assigneeId = assignee?.id || null; item.assigneeName = assignee ? (assignee.name || assignee.username) : null;
     if (assignee) notifyUser(assignee.id, 'task.assigned', '任务已指派给你', item.title, 'task', item.id);
@@ -2792,12 +2863,65 @@ app.put('/api/v2/tasks/:id', (req, res) => {
   item.updatedAt = nowIso(); writeAll('tasks', items); recordControlAudit(req, u, 'task.update', 'task', item.id);
   res.json({ item });
 });
+const announcementAttachmentDir = path.join(store.DATA_DIR, 'uploads', 'announcements');
+const announcementImageTypes = {
+  'image/png': { ext: '.png', namePattern: /\.png$/i, signature: b => b.length >= 8 && b.subarray(0, 8).equals(Buffer.from([137,80,78,71,13,10,26,10])) },
+  'image/jpeg': { ext: '.jpg', namePattern: /\.jpe?g$/i, signature: b => b.length >= 3 && b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff },
+};
+const ANNOUNCEMENT_IMAGE_MAX_COUNT = 10;
+const ANNOUNCEMENT_IMAGE_MAX_BYTES = 4 * 1024 * 1024;
+const ANNOUNCEMENT_IMAGE_TOTAL_BYTES = 10 * 1024 * 1024;
+function parseAnnouncementImages(raw) {
+  const images = raw === undefined ? [] : raw;
+  if (!Array.isArray(images) || images.length > ANNOUNCEMENT_IMAGE_MAX_COUNT) return { error: '公告图片最多 10 张' };
+  const value = []; let total = 0;
+  for (const file of images) {
+    const mimeType = String(file?.mimeType || '').toLowerCase();
+    const type = announcementImageTypes[mimeType];
+    const name = path.basename(String(file?.fileName || '')).replace(/[\\/\r\n\0]/g, '_').slice(0, 180);
+    if (!type || !name || !type.namePattern.test(name) || typeof file?.data !== 'string' || file.data.length > 6_000_000) return { error: '请上传 PNG 或 JPG 图片，每张不超过 4MB' };
+    const match = file.data.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/);
+    if (!match || match[1].toLowerCase() !== mimeType) return { error: '公告图片上传格式无效' };
+    const buffer = Buffer.from(match[2], 'base64');
+    total += buffer.length;
+    if (!buffer.length || buffer.length > ANNOUNCEMENT_IMAGE_MAX_BYTES || !type.signature(buffer)) return { error: '图片内容与格式不匹配，或图片超过 4MB' };
+    value.push({ name, mimeType, ext: type.ext, buffer });
+  }
+  if (total > ANNOUNCEMENT_IMAGE_TOTAL_BYTES) return { error: '本次公告图片合计不能超过 10MB' };
+  return { value };
+}
+function saveAnnouncementImages(item, user, images) {
+  const saved = [];
+  try {
+    fs.mkdirSync(path.dirname(announcementAttachmentDir), { recursive: true, mode: 0o700 });
+    fs.mkdirSync(announcementAttachmentDir, { recursive: true, mode: 0o700 });
+    fs.chmodSync(path.dirname(announcementAttachmentDir), 0o700);
+    fs.chmodSync(announcementAttachmentDir, 0o700);
+    for (const image of images) {
+      const id = nanoid(), storedName = `${id}${image.ext}`;
+      fs.writeFileSync(path.join(announcementAttachmentDir, storedName), image.buffer, { mode: 0o600, flag: 'wx' });
+      saved.push({ id, name: image.name, mimeType: image.mimeType, size: image.buffer.length, storedName, uploadedBy: user.id, uploadedByName: user.name || user.username, createdAt: nowIso() });
+    }
+    return saved;
+  } catch (error) {
+    for (const attachment of saved) { try { fs.unlinkSync(path.join(announcementAttachmentDir, attachment.storedName)); } catch (cleanupError) {} }
+    throw error;
+  }
+}
+function announcementForClient(item) {
+  const attachments = Array.isArray(item?.attachments) ? item.attachments : [];
+  return { ...item, attachments: attachments.map(({ id, name, mimeType, size, createdAt }) => ({ id, name, mimeType, size, createdAt })) };
+}
+function publishedAnnouncement(id) {
+  return (readAll('announcements') || []).find(item => item.id === id && item.status === 'published');
+}
 app.get('/api/v2/announcements', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   const canManage = rbac.hasPermission(u, 'announcement.manage');
   const items = (readAll('announcements') || [])
     .filter(x => x.status === 'published')
-    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || String(b.updatedAt).localeCompare(String(a.updatedAt)));
+    .sort((a, b) => Number(!!b.pinned) - Number(!!a.pinned) || String(b.updatedAt).localeCompare(String(a.updatedAt)))
+    .map(announcementForClient);
   res.json({ items, canManage });
 });
 app.post('/api/v2/announcements', (req, res) => {
@@ -2808,11 +2932,23 @@ app.post('/api/v2/announcements', (req, res) => {
   if (req.body?.status && req.body.status !== 'published') return res.status(400).json({ error: '公告只能直接发布，不再支持草稿' });
   const status = 'published';
   if (!title || !body) return res.status(400).json({ error: '请填写公告标题和内容' });
+  const parsedImages = parseAnnouncementImages(req.body?.images);
+  if (parsedImages.error) return res.status(400).json({ error: parsedImages.error });
   const item = { id: nanoid(), title, body, status, pinned: !!req.body?.pinned,
-    createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), country: u.country || 'PH' };
-  const items = readAll('announcements') || []; items.unshift(item); writeAll('announcements', items);
-  recordControlAudit(req, u, 'announcement.create', 'announcement', item.id, { status, pinned: item.pinned });
-  res.status(201).json({ item });
+    createdBy: u.id, createdByName: u.name || u.username, createdAt: nowIso(), updatedAt: nowIso(), country: u.country || 'PH', attachments: [] };
+  let savedAttachments = [];
+  try {
+    savedAttachments = saveAnnouncementImages(item, u, parsedImages.value);
+    item.attachments = savedAttachments;
+    const items = readAll('announcements') || [];
+    items.unshift(item);
+    writeAll('announcements', items);
+  } catch (error) {
+    for (const attachment of savedAttachments) { try { fs.unlinkSync(path.join(announcementAttachmentDir, attachment.storedName)); } catch (cleanupError) {} }
+    return res.status(500).json({ error: '保存公告图片失败，公告未发布，请重试' });
+  }
+  recordControlAudit(req, u, 'announcement.create', 'announcement', item.id, { status, pinned: item.pinned, attachmentCount: item.attachments.length });
+  res.status(201).json({ item: announcementForClient(item) });
 });
 app.put('/api/v2/announcements/:id', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
@@ -2825,7 +2961,21 @@ app.put('/api/v2/announcements/:id', (req, res) => {
   Object.assign(item, { title, body, status: req.body.status, pinned: !!req.body.pinned, updatedAt: nowIso() });
   writeAll('announcements', items);
   recordControlAudit(req, u, 'announcement.update', 'announcement', item.id, { status: item.status, pinned: item.pinned });
-  res.json({ item });
+  res.json({ item: announcementForClient(item) });
+});
+app.get('/api/v2/announcements/:id/attachments/:attachmentId/preview', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  // Match the list audience exactly: only attachments on a currently published
+  // announcement are readable. Managing an archived announcement grants no
+  // extra attachment-read path.
+  const item = publishedAnnouncement(req.params.id);
+  if (!item) return res.status(404).json({ error: '公告不存在或当前不可查看' });
+  const attachment = (Array.isArray(item.attachments) ? item.attachments : []).find(entry => entry.id === req.params.attachmentId);
+  if (!attachment || !announcementImageTypes[attachment.mimeType] || !/^[A-Za-z0-9_-]+\.(png|jpg)$/.test(attachment.storedName || '')) return res.status(404).json({ error: '公告图片不存在' });
+  const filePath = path.join(announcementAttachmentDir, attachment.storedName);
+  if (!fs.existsSync(filePath)) return res.status(404).json({ error: '公告图片文件不存在' });
+  res.set({ 'Content-Type': attachment.mimeType, 'Content-Disposition': 'inline', 'X-Content-Type-Options': 'nosniff', 'Cache-Control': 'private, no-store' });
+  res.sendFile(filePath);
 });
 app.get('/api/v2/notifications', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
