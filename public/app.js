@@ -4624,68 +4624,78 @@ async function openAccountWorkspaceSettings(account) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
-const ACCESS_AREA_LABELS = {
-  dashboard: ['Dashboard', '经营总览'], org: ['Organization', '部门人员'], warehouse: ['Warehouse', '仓库'],
-  workflow: ['Workflows', '审批流程'], announcement: ['Announcements', '内容公告'], deposit: ['Cash reports', '现金上报'],
-  store: ['Stores', '门店'], staff: ['Employees', '员工'], member: ['Members', '会员'], points: ['Points', '积分'],
-  approval: ['Points approvals', '积分审核'], mall: ['Points mall', '积分商城'], crm: ['CRM', '客户管理'],
-  task: ['Tasks', '任务协作'], purchase: ['Purchasing', '采购跟单'], alert: ['Alerts', '运营异常'],
-  report: ['Reports', '报表'], aftersales: ['After-sales', '售后'], training: ['Training', '培训'],
-  kingdee: ['Kingdee data', '金蝶数据'], system: ['System', '系统管理'], sync: ['Cloud sync', '云同步'],
-  db: ['Main database', '数据主库'],
-};
-const ACCESS_ACTION_LABELS = {
-  view: ['View', '查看'], manage: ['Manage', '管理'], create: ['Create', '创建'], edit: ['Edit', '编辑'],
-  delete: ['Delete', '删除'], approve: ['Approve', '审批通过'], configure: ['Configure', '配置'],
-  execute: ['Execute', '执行'], remind: ['Remind', '提醒'], submit: ['Submit', '提交'], review: ['Review', '审核'],
-  assign: ['Assign', '指派'], appraise: ['Appraise', '评价'], grant: ['Grant', '发放'],
-  deduct: ['Deduct', '扣减'], adjust: ['Adjust', '调整'], reject: ['Reject', '驳回'],
-  redeem: ['Redeem', '兑换'], fulfill: ['Fulfill', '履约'], cancel: ['Cancel', '取消'],
-  close: ['Close', '办结'], escalate: ['Escalate', '升级处理'], export: ['Export', '导出'],
-  config: ['Configure', '配置'], run: ['Run', '运行'],
-};
-const ACCESS_PERMISSION_SPECIAL_LABELS = {
-  'points.grant.direct': ['Grant points directly', '直接发放积分'],
-  'points.rule.edit': ['Edit points rules', '编辑积分规则'],
-  'points.expiry.scan': ['Scan expiring points', '扫描到期积分'],
-  'system.user.view': ['View accounts', '查看账号'],
-  'system.user.edit': ['Edit accounts', '编辑账号'],
-  'system.role.manage': ['Manage roles and access', '管理角色与权限'],
-  'system.config.edit': ['Edit system settings', '编辑系统设置'],
-  'system.audit.view': ['View audit logs', '查看审计日志'],
-};
-function accessAreaLabel(area) {
-  const label = ACCESS_AREA_LABELS[area];
-  return label ? ccText(...label) : area;
-}
-function accessPermissionLabel(permission) {
-  const special = ACCESS_PERMISSION_SPECIAL_LABELS[permission];
-  if (special) return ccText(...special);
-  const [area, action] = String(permission).split('.');
-  const actionLabel = ACCESS_ACTION_LABELS[action];
-  return `${accessAreaLabel(area)} · ${actionLabel ? ccText(...actionLabel) : action}`;
-}
-function accessScopeLabel(scope) {
-  return ({ global: ccText('All company', '全公司'), hq: ccText('Head office', '总部'), philippines: ccText('Philippines', '菲律宾'), region: ccText('Linked region', '关联区域'), store: ccText('Linked store', '关联门店'), self: ccText('Own records only', '仅本人') })[scope] || scope;
+// Keep this list in the same order as the sidebar. Each checkbox grants every
+// operation implemented in that menu; retired modules are not offered here.
+const ACCESS_MENU_GROUPS = [
+  { key: 'controlCenter', label: ['Control center', '中控平台'], permissions: ['dashboard.view'] },
+  { key: 'org', label: ['Departments and people', '部门人员'], permissions: ['org.view', 'org.manage', 'staff.view', 'staff.create', 'staff.edit', 'staff.delete', 'staff.assign', 'staff.appraise'] },
+  { key: 'approvals', label: ['Approval center', '审批中心'], permissions: ['workflow.view', 'workflow.create', 'workflow.approve', 'workflow.execute'] },
+  { key: 'collaboration', label: ['Task collaboration', '任务协作'], permissions: ['task.view', 'task.create', 'task.edit', 'task.assign', 'task.close'] },
+  { key: 'stores', label: ['Store management', '门店管理'], permissions: ['store.view', 'store.create', 'store.edit', 'store.delete'] },
+  { key: 'dailyDeposits', label: ['Cash reports', '现金上报'], permissions: ['deposit.view', 'deposit.remind', 'deposit.submit', 'deposit.review'] },
+  { key: 'purchasing', label: ['Order tracking', '跟单进度'], permissions: ['purchase.view', 'purchase.create', 'purchase.edit'] },
+  { key: 'announcements', label: ['Announcements', '内容公告'], permissions: ['announcement.manage'] },
+  { key: 'accounts', label: ['Account management', '账号管理'], permissions: ['system.user.view', 'system.user.edit', 'system.role.manage'] },
+  { key: 'governance', label: ['Approval routes', '审批流程'], permissions: ['workflow.configure'] },
+  { key: 'db', label: ['Data maintenance', '数据维护'], permissions: ['db.view', 'db.export'] },
+  { key: 'audit', label: ['Audit logs', '审计日志'], permissions: ['system.audit.view'] },
+];
+const ACCESS_GLOBAL_ONLY = new Set([
+  'purchase.view', 'purchase.create', 'purchase.edit', 'workflow.configure',
+  'points.rule.edit', 'points.expiry.scan', 'sync.view', 'sync.config', 'sync.run',
+  'system.user.view', 'system.user.edit', 'system.role.manage', 'system.config.edit',
+  'system.audit.view', 'db.view', 'db.export',
+]);
+function accessNewScope(permission, account, currentGrants) {
+  if (ACCESS_GLOBAL_ONLY.has(permission)) return 'global';
+  const existing = currentGrants.find(grant => grant.permission === permission);
+  if (existing) return existing.scope;
+  if (account.storeId) return 'store';
+  if (account.regionId) return 'region';
+  const priorScope = currentGrants.find(grant => ['hq', 'philippines', 'self'].includes(grant.scope))?.scope;
+  if (priorScope) return priorScope;
+  return 'global';
 }
 async function openAccountAccessSettings(account) {
   try {
     const data = await GET(`/api/v2/users/${encodeURIComponent(account.id)}/access-policy`);
     const policy = data.item.policy || { state: 'pending_authorization', grants: [], assignmentTargets: { task: [] }, assignmentEligibility: { task: false } };
-    const selected = new Map((policy.grants || []).map(grant => [grant.permission, grant.scope]));
-    const grouped = (data.permissions || []).reduce((all, permission) => { const key = permission.split('.')[0]; (all[key] ||= []).push(permission); return all; }, {});
-    const grantRows = Object.entries(grouped).map(([area, permissions]) => `<fieldset class="cc-workspace-layout-list"><legend>${escapeHtml(accessAreaLabel(area))}</legend>${permissions.map(permission => `<label class="cc-workspace-layout-row"><span><input type="checkbox" data-access-permission="${escapeHtml(permission)}" ${selected.has(permission) ? 'checked' : ''}/> ${escapeHtml(accessPermissionLabel(permission))}</span><select data-access-scope="${escapeHtml(permission)}" ${selected.has(permission) ? '' : 'disabled'}>${(data.scopes || []).map(scope => `<option value="${escapeHtml(scope)}" ${(selected.get(permission) || 'self') === scope ? 'selected' : ''}>${escapeHtml(accessScopeLabel(scope))}</option>`).join('')}</select></label>`).join('')}</fieldset>`).join('');
+    const currentGrants = policy.grants || [];
+    const selected = new Set(currentGrants.map(grant => grant.permission));
+    const available = new Set(data.permissions || []);
+    const grantRows = ACCESS_MENU_GROUPS.map(group => {
+      const permissions = group.permissions.filter(permission => available.has(permission));
+      const granted = permissions.filter(permission => selected.has(permission)).length;
+      return `<label class="cc-workspace-layout-row"><span><input type="checkbox" data-access-menu="${group.key}" ${granted === permissions.length && permissions.length ? 'checked' : ''}/> ${escapeHtml(ccText(...group.label))}</span><small class="cc-meta">${granted > 0 && granted < permissions.length ? ccText('Some existing access', '现有部分权限') : ccText('All actions in this menu', '包含菜单内全部操作')}</small></label>`;
+    }).join('');
     const targets = new Set(policy.assignmentTargets?.task || []);
     const taskEligible = policy.assignmentEligibility?.task === true;
     const identity = `${account.name || account.username} · ${account.username}`;
     const inherited = data.item.inheritedLegacyPolicy ? `<p class="cc-meta">${ccText('This account has not been migrated yet. Saving makes this displayed policy its explicit source of truth; its historical access record is retained.', '该账号尚未迁移。保存后，本页显示的授权将成为唯一生效来源；历史授权记录会保留。')}</p>` : '';
-    const modal = openModal({ title: `${ccText('Person access', '人员授权')} · ${escapeHtml(identity)}`, body: `<p class="cc-meta">${ccText('Every selected function is enforced by the server. Department association never adds access. Leaving every function unchecked denies all business access.', '每项勾选的功能均由服务器强制执行。关联部门不会自动获得权限；全部不勾选即无业务权限。')}</p>${inherited}<form id="ccAccessPolicyForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Authorization state', '授权状态')}</span><select name="state"><option value="pending_authorization" ${policy.state !== 'active' ? 'selected' : ''}>${ccText('Pending — sign in and password only', '待授权：仅登录和修改密码')}</option><option value="active" ${policy.state === 'active' ? 'selected' : ''}>${ccText('Active', '已启用')}</option></select></label></div><div class="cc-access-policy-list">${grantRows}</div><fieldset class="cc-workspace-layout-list"><legend>${ccText('Task receipt and assignment', '任务接收与指派')}</legend><label class="cc-workspace-layout-row"><span><input type="checkbox" name="taskEligible" ${taskEligible ? 'checked' : ''}/> ${ccText('May receive tasks in approved dynamic scope', '可在已批准动态范围内接收任务')}</span></label><p class="cc-meta">${ccText('This requires task view and close. The selected list below is a separate explicit assignment list and still respects task scope.', '这要求同时拥有任务查看和办结权限。下方名单是独立的明确指派名单，仍受任务范围限制。')}</p><select name="taskTargets" multiple size="8">${(data.candidates || []).map(candidate => `<option value="${escapeHtml(candidate.id)}" ${targets.has(candidate.id) ? 'selected' : ''}>${escapeHtml(candidate.name || candidate.username)} · ${escapeHtml(candidate.username)}</option>`).join('')}</select></fieldset></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccAccessPolicySave">${ccText('Save access', '保存授权')}</button>` });
-    $$('[data-access-permission]', modal).forEach(input => input.addEventListener('change', () => { const select = $(`[data-access-scope="${input.dataset.accessPermission}"]`, modal); if (select) select.disabled = !input.checked; }));
+    const modal = openModal({ title: `${ccText('Person access', '人员授权')} · ${escapeHtml(identity)}`, body: `<p class="cc-meta">${ccText('Select the sidebar menus this person may use. Selecting a menu grants all its actions. Existing scopes are retained; new access uses the linked store or region, while system-wide functions use company scope. Historical access outside the sidebar stays unchanged.', '请按左侧菜单勾选。勾选后包含该菜单的全部操作。现有范围保持不变；新增权限使用关联门店或区域，系统级功能使用全公司范围。左侧菜单以外的历史权限保持不变。')}</p>${inherited}<form id="ccAccessPolicyForm"><div class="cc-form-grid"><label class="cc-field"><span>${ccText('Authorization state', '授权状态')}</span><select name="state"><option value="pending_authorization" ${policy.state !== 'active' ? 'selected' : ''}>${ccText('Pending — sign in and password only', '待授权：仅登录和修改密码')}</option><option value="active" ${policy.state === 'active' ? 'selected' : ''}>${ccText('Active', '已启用')}</option></select></label></div><div class="cc-access-policy-list">${grantRows}</div><fieldset class="cc-workspace-layout-list"><legend>${ccText('Task receipt and assignment', '任务接收与指派')}</legend><label class="cc-workspace-layout-row"><span><input type="checkbox" name="taskEligible" ${taskEligible ? 'checked' : ''}/> ${ccText('May receive tasks in approved dynamic scope', '可在已批准动态范围内接收任务')}</span></label><p class="cc-meta">${ccText('This requires task view and close. The selected list below is a separate explicit assignment list and still respects task scope.', '这要求同时拥有任务查看和办结权限。下方名单是独立的明确指派名单，仍受任务范围限制。')}</p><select name="taskTargets" multiple size="8">${(data.candidates || []).map(candidate => `<option value="${escapeHtml(candidate.id)}" ${targets.has(candidate.id) ? 'selected' : ''}>${escapeHtml(candidate.name || candidate.username)} · ${escapeHtml(candidate.username)}</option>`).join('')}</select></fieldset></form>`, footer: `<button class="btn" data-close>${ccText('Cancel', '取消')}</button><button class="btn btn-primary" id="ccAccessPolicySave">${ccText('Save access', '保存授权')}</button>` });
+    $$('[data-access-menu]', modal).forEach(input => {
+      const group = ACCESS_MENU_GROUPS.find(item => item.key === input.dataset.accessMenu);
+      const permissions = group.permissions.filter(permission => available.has(permission));
+      input.indeterminate = permissions.some(permission => selected.has(permission)) && !permissions.every(permission => selected.has(permission));
+      input.addEventListener('change', () => { input.dataset.touched = 'true'; input.indeterminate = false; });
+    });
     $('#ccAccessPolicySave', modal).addEventListener('click', async () => {
       const form = $('#ccAccessPolicyForm', modal);
-      const grants = $$('[data-access-permission]:checked', form).map(input => ({ permission: input.dataset.accessPermission, scope: $(`[data-access-scope="${input.dataset.accessPermission}"]`, form).value }));
+      const menuPermissions = new Set(ACCESS_MENU_GROUPS.flatMap(group => group.permissions));
+      const normalizeScope = grant => ACCESS_GLOBAL_ONLY.has(grant.permission) ? { ...grant, scope: 'global' } : grant;
+      const grants = currentGrants.filter(grant => !menuPermissions.has(grant.permission)).map(normalizeScope);
+      $$('[data-access-menu]', form).forEach(input => {
+        const group = ACCESS_MENU_GROUPS.find(item => item.key === input.dataset.accessMenu);
+        const permissions = group.permissions.filter(permission => available.has(permission));
+        if (input.dataset.touched !== 'true') {
+          grants.push(...currentGrants.filter(grant => permissions.includes(grant.permission)).map(normalizeScope));
+        } else if (input.checked) {
+          grants.push(...permissions.map(permission => ({ permission, scope: accessNewScope(permission, account, currentGrants) })));
+        }
+      });
       const taskTargets = Array.from(form.elements.taskTargets.selectedOptions).map(option => option.value);
-      try { await PUT(`/api/v2/users/${encodeURIComponent(account.id)}/access-policy`, { policy: { state: form.elements.state.value, grants, assignmentTargets: { task: taskTargets }, assignmentEligibility: { task: form.elements.taskEligible.checked } } }); closeModal(); toast(ccText('Person access saved', '人员授权已保存'), 'success'); await renderAccounts(root); } catch (err) { toast(err.message, 'error'); }
+      const taskEligible = form.elements.taskEligible.checked && grants.some(grant => grant.permission === 'task.view') && grants.some(grant => grant.permission === 'task.close');
+      try { await PUT(`/api/v2/users/${encodeURIComponent(account.id)}/access-policy`, { policy: { state: form.elements.state.value, grants, assignmentTargets: { task: taskTargets }, assignmentEligibility: { task: taskEligible } } }); closeModal(); toast(ccText('Person access saved', '人员授权已保存'), 'success'); await renderAccounts(root); } catch (err) { toast(err.message, 'error'); }
     });
   } catch (err) { toast(err.message, 'error'); }
 }

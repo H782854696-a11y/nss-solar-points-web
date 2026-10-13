@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
+const vm = require('node:vm');
 const { spawnSync } = require('node:child_process');
 const rbac = require('../lib/rbac');
 const { startLocalApp } = require('./helpers/local-app');
@@ -105,9 +106,35 @@ test('account UI replaces role grants with explicit access settings and keeps la
   assert.match(app, /data-workspace-account/);
   assert.match(app, /taskEligible/);
   assert.doesNotMatch(app, /data-access-account/);
-  assert.match(app, /Department association never adds access/);
+  assert.match(app, /Select the sidebar menus this person may use/);
   assert.doesNotMatch(app, /data-grant-role/);
   assert.doesNotMatch(app, /ccGrantRoleForm/);
   assert.match(app, /data-workspace-account/);
-  assert.match(index, /app\.js\?v=110/);
+  assert.match(index, /app\.js\?v=112/);
+});
+
+test('person access checkboxes match the sidebar and contain only known permissions', () => {
+  const app = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
+  const index = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8');
+  const definition = app.match(/const ACCESS_MENU_GROUPS = (\[[\s\S]*?\]);/);
+  assert.ok(definition);
+  const groups = vm.runInNewContext(definition[1]);
+  const sidebarKeys = [...index.matchAll(/<div class="nav-item[^"]*" data-screen="([^"]+)"(?: data-workspace="([^"]+)")?/g)]
+    .map(match => match[2] || match[1]);
+  assert.deepEqual(Array.from(groups, group => group.key), sidebarKeys);
+  const permissions = groups.flatMap(group => group.permissions);
+  assert.equal(new Set(permissions).size, permissions.length, 'a permission belongs to one menu only');
+  assert.ok(permissions.every(permission => rbac.PERMISSIONS.includes(permission)), 'all bundled permissions are accepted by the API');
+  assert.ok(!permissions.some(permission => /^(member|points|mall|crm|aftersales|training|sync)\./.test(permission)), 'retired and unrelated modules are absent');
+});
+
+test('new menu grants use the linked scope and system grants use global scope', () => {
+  const app = fs.readFileSync(path.join(ROOT, 'public', 'app.js'), 'utf8');
+  const source = app.slice(app.indexOf('const ACCESS_GLOBAL_ONLY ='), app.indexOf('async function openAccountAccessSettings'));
+  const scopeFor = vm.runInNewContext(`${source}\naccessNewScope`);
+  assert.equal(scopeFor('store.edit', { storeId: 'S1', regionId: 'R1' }, []), 'store');
+  assert.equal(scopeFor('org.manage', { regionId: 'R1' }, []), 'region');
+  assert.equal(scopeFor('task.view', {}, [{ permission: 'task.view', scope: 'self' }]), 'self');
+  assert.equal(scopeFor('system.user.view', { storeId: 'S1' }, []), 'global');
+  assert.equal(scopeFor('purchase.edit', { regionId: 'R1' }, []), 'global');
 });
