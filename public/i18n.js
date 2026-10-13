@@ -742,7 +742,7 @@
     'accounts.empty': ['No accounts found', '没有账号'],
     'accounts.colStore': ['Store', '门店'],
     'accounts.colUser': ['Username', '用户名'],
-    'accounts.colRole': ['Role', '职位'],
+    'accounts.colRole': ['Department', '部门'],
     'accounts.colStatus': ['Status', '状态'],
     'accounts.colActions': ['Actions', '操作'],
     'accounts.statusActive': ['Active', '启用'],

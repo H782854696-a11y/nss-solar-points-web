@@ -16,10 +16,12 @@ test('approval settings use one authorized named user per new workflow and prese
   const old = await create('stocktake', { storeId });
   assert.equal(old.status, 201, JSON.stringify(old.data));
   const oldSnapshot = JSON.parse(JSON.stringify(old.data.item.approvalSteps));
-  const account = await app.request('POST', '/api/v2/users', { username: 'simple_route_approver', name: 'Simple Route Approver', role: 'philippines_manager', password: app.password }, admin);
+  const employee = await app.request('POST', '/api/v2/employees', { name: 'Simple Route Approver' }, admin);
+  assert.equal(employee.status, 201, JSON.stringify(employee.data));
+  const account = await app.createPendingThenGrant(admin, { username: 'simple_route_approver', name: 'Simple Route Approver', employeeId: employee.data.item.id, country: 'PH', role: 'philippines_manager', password: app.password });
   assert.equal(account.status, 201, JSON.stringify(account.data));
   const approverId = account.data.item.id;
-  const payload = Object.fromEntries(types.map(type => [type, { steps: [{ approvers: [{ kind: 'user', id: approverId }] }] }]));
+  const payload = Object.fromEntries(types.map(type => [type, { steps: [{ approvers: [{ kind: 'user', employeeId: employee.data.item.id }] }] }]));
   assert.equal((await app.request('PUT', '/api/v2/workflows/definitions', { definitions: payload }, admin)).status, 200);
   const definitions = await app.request('GET', '/api/v2/workflows/definitions', null, admin);
   assert.equal(definitions.status, 200);
@@ -29,7 +31,7 @@ test('approval settings use one authorized named user per new workflow and prese
   const newer = await create('store_remediation', { storeId, issue: 'Repair sign' });
   assert.equal(newer.status, 201);
   assert.deepEqual(newer.data.item.approvalSteps[0].approvers, [{ kind: 'user', id: approverId }]);
-  const manager = await app.request('POST', '/api/v2/users', { username: 'simple_route_manager', name: 'Simple Route Manager', role: 'manager', storeId, password: app.password }, admin);
+  const manager = await app.createPendingThenGrant(admin, { username: 'simple_route_manager', name: 'Simple Route Manager', role: 'manager', storeId, password: app.password });
   const managerLogin = await app.login('simple_route_manager');
   assert.equal((await app.request('PUT', '/api/v2/workflows/definitions', { definitions: payload }, managerLogin)).status, 403, 'configuration permission remains enforced');
   const invalid = JSON.parse(JSON.stringify(payload)); invalid.stocktake.steps[0].approvers = [{ kind: 'role', id: 'admin' }];

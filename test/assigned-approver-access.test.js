@@ -1,0 +1,116 @@
+'use strict';
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const { startLocalApp, photo } = require('./helpers/local-app');
+
+const types = ['stocktake', 'store_remediation', 'expense_reimbursement', 'discount_request', 'store_receipt'];
+const readJson = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
+const writeJson = (file, value) => fs.writeFileSync(file, JSON.stringify(value, null, 2));
+
+test('candidate reasons and definition validation fail closed for unlinked, pending, disabled, archived, and account-id inputs', { timeout: 30000 }, async t => {
+  const app = await startLocalApp(); t.after(app.close);
+  const admin = await app.login('admin');
+  const storeId = (await app.request('GET', '/api/stores', null, admin)).data.items[0].id;
+  const unlinked = await app.request('POST', '/api/v2/employees', { name: 'Unlinked candidate' }, admin);
+  const pendingEmployee = await app.request('POST', '/api/v2/employees', { name: 'Pending candidate' }, admin);
+  const pending = await app.request('POST', '/api/v2/users', { username: 'pending_candidate', name: 'Pending candidate', password: app.password, employeeId: pendingEmployee.data.item.id, storeId, country: 'PH' }, admin);
+  const disabledEmployee = await app.request('POST', '/api/v2/employees', { name: 'Disabled candidate' }, admin);
+  const disabled = await app.createPendingThenGrant(admin, { username: 'disabled_candidate', name: 'Disabled candidate', password: app.password, employeeId: disabledEmployee.data.item.id, storeId, country: 'PH', role: 'sales' });
+  assert.equal((await app.request('PUT', `/api/users/${disabled.data.item.id}/status`, { disabled: true }, admin)).status, 200);
+  const candidates = await app.request('GET', '/api/v2/workflows/approver-candidates', null, admin);
+  const byEmployee = id => candidates.data.items.find(item => item.employeeId === id);
+  assert.equal(byEmployee(unlinked.data.item.id).reason, '未关联登录账号');
+  assert.equal(byEmployee(pendingEmployee.data.item.id).reason, '关联账号尚未授权');
+  assert.equal(byEmployee(disabledEmployee.data.item.id).reason, '关联账号已停用');
+  const badSteps = employeeId => ({ steps: [{ approvers: [{ kind: 'user', employeeId }] }] });
+  assert.equal((await app.request('PUT', '/api/v2/workflows/definitions/stocktake', badSteps(unlinked.data.item.id), admin)).status, 400);
+  assert.equal((await app.request('PUT', '/api/v2/workflows/definitions/stocktake', badSteps(disabled.data.item.id), admin)).status, 400, 'an account id is never accepted as an employee id');
+  assert.equal((await app.request('POST', `/api/v2/employees/${disabledEmployee.data.item.id}/archive`, {}, admin)).status, 200);
+  const afterArchive = await app.request('GET', '/api/v2/workflows/approver-candidates', null, admin);
+  assert.equal(afterArchive.data.items.some(item => item.employeeId === disabledEmployee.data.item.id), false);
+  assert.equal((await app.request('PUT', '/api/v2/workflows/definitions/stocktake', badSteps(disabledEmployee.data.item.id), admin)).status, 400);
+});
+
+test('named employee approval is a current-instance-only exception with no upload, comment, or unrelated-record access', { timeout: 30000 }, async t => {
+  const app = await startLocalApp(); t.after(app.close);
+  const admin = await app.login('admin');
+  const storeId = (await app.request('GET', '/api/stores', null, admin)).data.items[0].id;
+  const old = await app.request('POST', '/api/v2/workflows', { type: 'stocktake', form: { storeId }, images: [photo] }, admin);
+  assert.equal(old.status, 201, JSON.stringify(old.data));
+  const employee = await app.request('POST', '/api/v2/employees', { name: 'Cross scope named approver' }, admin);
+  assert.equal(employee.status, 201, JSON.stringify(employee.data));
+  const account = await app.createPendingThenGrant(admin, { username: 'named_sales_approver', name: 'Cross scope named approver', employeeId: employee.data.item.id, storeId, country: 'PH', role: 'sales', password: app.password });
+  assert.equal(account.status, 201, JSON.stringify(account.data));
+  const candidate = await app.request('GET', '/api/v2/workflows/approver-candidates', null, admin);
+  assert.equal(candidate.status, 200);
+  assert.deepEqual(candidate.data.items.find(x => x.employeeId === employee.data.item.id), {
+    employeeId: employee.data.item.id, name: 'Cross scope named approver', departmentName: '', accountId: account.data.item.id, username: 'named_sales_approver', selectable: true, reason: null,
+  });
+  const definitions = Object.fromEntries(types.map(type => [type, { steps: [{ approvers: [{ kind: 'user', employeeId: employee.data.item.id }] }] }]));
+  assert.equal((await app.request('PUT', '/api/v2/workflows/definitions', { definitions }, admin)).status, 200);
+  const current = await app.request('POST', '/api/v2/workflows', { type: 'stocktake', form: { storeId }, images: [photo], assignedApproverAccess: { steps: [[{ employeeId: 'attacker', userId: 'attacker' }]] } }, admin);
+  assert.equal(current.status, 201, JSON.stringify(current.data));
+  assert.deepEqual(current.data.item.assignedApproverAccess.steps, [[{ employeeId: employee.data.item.id, userId: account.data.item.id }]]);
+  const multi = await app.request('POST', '/api/v2/workflows', { type: 'stocktake', form: { storeId }, images: [photo] }, admin);
+  const storedBefore = readJson(path.join(app.dataDir, 'workflowInstances.json'));
+  const multiStored = storedBefore.find(item => item.id === multi.data.item.id);
+  const adminId = (await app.request('GET', '/api/auth/me', null, admin)).data.user.id;
+  multiStored.approvalSteps[0] = { ...multiStored.approvalSteps[0], mode: 'all', approvers: [...multiStored.approvalSteps[0].approvers, { kind: 'user', id: adminId }] };
+  writeJson(path.join(app.dataDir, 'workflowInstances.json'), storedBefore);
+  let named = await app.login('named_sales_approver');
+  const visible = await app.request('GET', '/api/v2/workflows?limit=50', null, named);
+  assert.equal(visible.status, 200, JSON.stringify(visible.data));
+  assert.deepEqual(new Set(visible.data.items.map(x => x.id)), new Set([current.data.item.id, multi.data.item.id]), 'the exception cannot expose old or other workflow records');
+  assert.ok(visible.data.items.every(item => item.assignedApproverForMe), 'the UI can suppress non-approval actions for this narrow exception');
+  const usersFile = path.join(app.dataDir, 'users.json'), employeesFile = path.join(app.dataDir, 'employees.json');
+  const users = readJson(usersFile), namedUser = users.find(user => user.id === account.data.item.id);
+  namedUser.country = 'CN'; writeJson(usersFile, users);
+  assert.deepEqual((await app.request('GET', '/api/v2/workflows?limit=50', null, named)).data.items, [], 'a post-assignment country change revokes narrow access');
+  namedUser.country = 'PH'; writeJson(usersFile, users);
+  const employees = readJson(employeesFile), namedEmployee = employees.find(item => item.id === employee.data.item.id);
+  namedEmployee.active = false; writeJson(employeesFile, employees);
+  assert.deepEqual((await app.request('GET', '/api/v2/workflows?limit=50', null, named)).data.items, [], 'archiving the employee revokes narrow access');
+  namedEmployee.active = true; writeJson(employeesFile, employees);
+  users.push({ ...namedUser, id: 'duplicate-linked-account', username: 'duplicate_linked_account', employeeId: employee.data.item.id }); writeJson(usersFile, users);
+  assert.deepEqual((await app.request('GET', '/api/v2/workflows?limit=50', null, named)).data.items, [], 'making the employee linkage ambiguous revokes narrow access');
+  users.pop(); writeJson(usersFile, users);
+  namedUser.disabled = true; writeJson(usersFile, users);
+  assert.equal((await app.request('GET', '/api/v2/workflows?limit=50', null, named)).status, 401, 'disabling the linked account invalidates its session and access');
+  namedUser.disabled = false; writeJson(usersFile, users); named = (await app.request('POST', '/api/auth/login', { username: 'named_sales_approver', password: app.changedPassword })).cookie;
+  const oldAttachmentId = old.data.item.attachments[0].id;
+  assert.equal((await fetch(`${app.base}/api/v2/workflows/${old.data.item.id}/attachments/${oldAttachmentId}/download`, { headers: { cookie: named } })).status, 403, 'an attachment id from another workflow cannot be used as an access bypass');
+  assert.equal((await app.request('POST', `/api/v2/workflows/${current.data.item.id}/actions`, { action: 'comment', comment: 'not allowed' }, named)).status, 403);
+  assert.equal((await app.request('POST', `/api/v2/workflows/${current.data.item.id}/attachments`, { ...photo, evidenceType: 'supporting' }, named)).status, 403);
+  const attachmentId = current.data.item.attachments[0].id;
+  assert.equal((await fetch(`${app.base}/api/v2/workflows/${current.data.item.id}/attachments/${attachmentId}/download`, { headers: { cookie: named } })).status, 403, 'the narrow exception cannot download even an image as a general file');
+  const download = await fetch(`${app.base}/api/v2/workflows/${current.data.item.id}/attachments/${attachmentId}/download?disposition=inline`, { headers: { cookie: named } });
+  assert.equal(download.status, 200, 'the assigned approver may read this request evidence only');
+  assert.equal((await app.request('POST', `/api/v2/workflows/${multi.data.item.id}/actions`, { action: 'approve' }, named)).status, 200);
+  const afterAllSignature = await app.request('GET', '/api/v2/workflows?limit=50', null, named);
+  assert.deepEqual(afterAllSignature.data.items.map(x => x.id), [current.data.item.id], 'an already-signed user loses its narrow access while another all-signature remains pending');
+  assert.equal((await app.request('POST', `/api/v2/workflows/${current.data.item.id}/actions`, { action: 'approve' }, named)).status, 200);
+  const stored = JSON.parse(fs.readFileSync(path.join(app.dataDir, 'workflowInstances.json'), 'utf8'));
+  assert.equal(stored.find(x => x.id === current.data.item.id).status, 'approved');
+  const afterDecision = await app.request('GET', '/api/v2/workflows?limit=50', null, named);
+  assert.deepEqual(afterDecision.data.items, [], 'the narrow assignment disappears as soon as the current approval step ends');
+  assert.equal((await fetch(`${app.base}/api/v2/workflows/${current.data.item.id}/attachments/${attachmentId}/download?disposition=inline`, { headers: { cookie: named } })).status, 403, 'completed-step evidence access is revoked with the assignment');
+});
+
+test('ordinary RBAC keeps legacy countryCode and derived-region workflow compatibility', { timeout: 30000 }, async t => {
+  const app = await startLocalApp(); t.after(app.close);
+  const admin = await app.login('admin');
+  const storeId = (await app.request('GET', '/api/stores', null, admin)).data.items[0].id;
+  const reviewer = await app.createPendingThenGrant(admin, { username: 'legacy_country_reviewer', name: 'Legacy Country Reviewer', country: 'PH', role: 'philippines_manager', password: app.password });
+  const created = await app.request('POST', '/api/v2/workflows', { type: 'stocktake', form: { storeId }, images: [photo] }, admin);
+  const file = path.join(app.dataDir, 'workflowInstances.json');
+  const records = readJson(file), item = records.find(x => x.id === created.data.item.id);
+  item.countryCode = 'PH'; delete item.country; item.regionId = null;
+  writeJson(file, records);
+  const cookie = await app.login('legacy_country_reviewer');
+  assert.equal((await app.request('GET', '/api/v2/workflows?limit=10', null, cookie)).data.items.some(x => x.id === item.id), true);
+  assert.equal((await fetch(`${app.base}/api/v2/workflows/${item.id}/attachments/${item.attachments[0].id}/download`, { headers: { cookie } })).status, 200);
+  assert.equal((await app.request('POST', `/api/v2/workflows/${item.id}/actions`, { action: 'approve' }, cookie)).status, 200);
+});
+

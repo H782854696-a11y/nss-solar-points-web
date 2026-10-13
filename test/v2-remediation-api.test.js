@@ -63,6 +63,13 @@ test('store remediation creation and stocktake upload work in the isolated V2 fl
     assert.equal(changed.status, 200, `${username} change password: ${JSON.stringify(changed.data)}`);
     return changed.cookie;
   }
+  async function createPendingThenGrant(payload, role = payload.role) {
+    const pending = { ...payload }; delete pending.role;
+    const created = await request('POST', '/api/v2/users', pending, admin);
+    if (created.status !== 201 || !role) return created;
+    const granted = await request('PUT', `/api/v2/users/${created.data.item.id}/role`, { role }, admin);
+    return granted.status === 200 ? created : granted;
+  }
   const admin = await loginAndChange('admin', initialPassword, changedPassword);
   const stores = await request('GET', '/api/stores', null, admin);
   assert.equal(stores.status, 200);
@@ -77,7 +84,7 @@ test('store remediation creation and stocktake upload work in the isolated V2 fl
   assert.equal(taskList.data.items.some(item => item.id === newTask.data.item.id), true, 'administrator can see a newly created task');
   const accounts = [];
   for (const [username, role] of [['v2_ph_reviewer', 'philippines_manager'], ['v2_sales_a', 'sales'], ['v2_sales_b', 'sales']]) {
-    const created = await request('POST', '/api/v2/users', { username, name: username, role, storeId: role === 'sales' ? storeId : null, password: userPassword }, admin);
+    const created = await createPendingThenGrant({ username, name: username, role, storeId: role === 'sales' ? storeId : null, password: userPassword });
     assert.equal(created.status, 201, `create ${username}: ${JSON.stringify(created.data)}`);
     accounts.push({ id: created.data.item.id, username, cookie: await loginAndChange(username, userPassword, userChangedPassword) });
   }
@@ -88,7 +95,7 @@ test('store remediation creation and stocktake upload work in the isolated V2 fl
   const reviewerTaskAssignees = await request('GET', '/api/v2/task-assignees', null, reviewer.cookie);
   assert.equal(reviewerTaskAssignees.status, 200);
   assert.equal(reviewerTaskAssignees.data.items.some(item => item.id === salesA.id), true, 'Philippines manager sees an eligible sales assignee');
-  const managerAccount = await request('POST', '/api/v2/users', { username: 'v2_store_manager', name: 'v2_store_manager', role: 'manager', storeId, password: userPassword }, admin);
+  const managerAccount = await createPendingThenGrant({ username: 'v2_store_manager', name: 'v2_store_manager', role: 'manager', storeId, password: userPassword });
   assert.equal(managerAccount.status, 201, JSON.stringify(managerAccount.data));
   const managerCookie = await loginAndChange('v2_store_manager', userPassword, userChangedPassword);
   const managerStocktake = await request('POST', '/api/v2/workflows', {

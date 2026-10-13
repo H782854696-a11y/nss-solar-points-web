@@ -19,7 +19,7 @@ test('actionable workflow query keeps an older current-user approval when global
   const stores = await app.request('GET', '/api/stores', null, admin);
   assert.equal(stores.status, 200);
   const storeId = stores.data.items[0].id;
-  const manager = await app.request('POST', '/api/v2/users', { username: 'older_actionable_manager', name: 'Older actionable manager', role: 'manager', storeId, password: managerPassword }, admin);
+  const manager = await app.createPendingThenGrant(admin, { username: 'older_actionable_manager', name: 'Older actionable manager', role: 'manager', storeId, password: managerPassword });
   assert.equal(manager.status, 201, JSON.stringify(manager.data));
   const managerLogin = await app.request('POST', '/api/auth/login', { username: 'older_actionable_manager', password: managerPassword });
   assert.equal(managerLogin.status, 200, JSON.stringify(managerLogin.data));

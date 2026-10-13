@@ -28,8 +28,18 @@ async function startLocalApp() {
     if (changed.status !== 200) throw new Error(JSON.stringify(changed));
     return changed.cookie;
   };
+  // Production account creation deliberately ignores a submitted role. Tests
+  // that need a business actor must model the same two protected actions an
+  // administrator performs: create a pending account, then grant its role.
+  const createPendingThenGrant = async (adminCookie, payload, role = payload.role) => {
+    const pending = { ...payload }; delete pending.role; delete pending.phone;
+    const created = await request('POST', '/api/v2/users', pending, adminCookie);
+    if (created.status !== 201 || !role) return created;
+    const granted = await request('PUT', `/api/v2/users/${encodeURIComponent(created.data.item.id)}/role`, { role }, adminCookie);
+    return granted.status === 200 ? created : granted;
+  };
   for(let n=0;n<100;n++){
-    try { if ((await request('GET','/api/health')).status === 200) return {base,dataDir,request,login,close,password,changedPassword}; } catch {}
+    try { if ((await request('GET','/api/health')).status === 200) return {base,dataDir,request,login,createPendingThenGrant,close,password,changedPassword}; } catch {}
     if(child.exitCode !== null) break;
     await new Promise(resolve => setTimeout(resolve,100));
   }
