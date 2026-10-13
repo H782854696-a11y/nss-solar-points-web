@@ -4624,9 +4624,46 @@ async function openAccountWorkspaceSettings(account) {
   } catch (err) { toast(err.message, 'error'); }
 }
 
+const ACCESS_AREA_LABELS = {
+  dashboard: ['Dashboard', '经营总览'], org: ['Organization', '部门人员'], warehouse: ['Warehouse', '仓库'],
+  workflow: ['Workflows', '审批流程'], announcement: ['Announcements', '内容公告'], deposit: ['Cash reports', '现金上报'],
+  store: ['Stores', '门店'], staff: ['Employees', '员工'], member: ['Members', '会员'], points: ['Points', '积分'],
+  approval: ['Points approvals', '积分审核'], mall: ['Points mall', '积分商城'], crm: ['CRM', '客户管理'],
+  task: ['Tasks', '任务协作'], purchase: ['Purchasing', '采购跟单'], alert: ['Alerts', '运营异常'],
+  report: ['Reports', '报表'], aftersales: ['After-sales', '售后'], training: ['Training', '培训'],
+  kingdee: ['Kingdee data', '金蝶数据'], system: ['System', '系统管理'], sync: ['Cloud sync', '云同步'],
+  db: ['Main database', '数据主库'],
+};
+const ACCESS_ACTION_LABELS = {
+  view: ['View', '查看'], manage: ['Manage', '管理'], create: ['Create', '创建'], edit: ['Edit', '编辑'],
+  delete: ['Delete', '删除'], approve: ['Approve', '审批通过'], configure: ['Configure', '配置'],
+  execute: ['Execute', '执行'], remind: ['Remind', '提醒'], submit: ['Submit', '提交'], review: ['Review', '审核'],
+  assign: ['Assign', '指派'], appraise: ['Appraise', '评价'], grant: ['Grant', '发放'],
+  deduct: ['Deduct', '扣减'], adjust: ['Adjust', '调整'], reject: ['Reject', '驳回'],
+  redeem: ['Redeem', '兑换'], fulfill: ['Fulfill', '履约'], cancel: ['Cancel', '取消'],
+  close: ['Close', '办结'], escalate: ['Escalate', '升级处理'], export: ['Export', '导出'],
+  config: ['Configure', '配置'], run: ['Run', '运行'],
+};
+const ACCESS_PERMISSION_SPECIAL_LABELS = {
+  'points.grant.direct': ['Grant points directly', '直接发放积分'],
+  'points.rule.edit': ['Edit points rules', '编辑积分规则'],
+  'points.expiry.scan': ['Scan expiring points', '扫描到期积分'],
+  'system.user.view': ['View accounts', '查看账号'],
+  'system.user.edit': ['Edit accounts', '编辑账号'],
+  'system.role.manage': ['Manage roles and access', '管理角色与权限'],
+  'system.config.edit': ['Edit system settings', '编辑系统设置'],
+  'system.audit.view': ['View audit logs', '查看审计日志'],
+};
+function accessAreaLabel(area) {
+  const label = ACCESS_AREA_LABELS[area];
+  return label ? ccText(...label) : area;
+}
 function accessPermissionLabel(permission) {
+  const special = ACCESS_PERMISSION_SPECIAL_LABELS[permission];
+  if (special) return ccText(...special);
   const [area, action] = String(permission).split('.');
-  return `${area} · ${action}`;
+  const actionLabel = ACCESS_ACTION_LABELS[action];
+  return `${accessAreaLabel(area)} · ${actionLabel ? ccText(...actionLabel) : action}`;
 }
 function accessScopeLabel(scope) {
   return ({ global: ccText('All company', '全公司'), hq: ccText('Head office', '总部'), philippines: ccText('Philippines', '菲律宾'), region: ccText('Linked region', '关联区域'), store: ccText('Linked store', '关联门店'), self: ccText('Own records only', '仅本人') })[scope] || scope;
@@ -4637,7 +4674,7 @@ async function openAccountAccessSettings(account) {
     const policy = data.item.policy || { state: 'pending_authorization', grants: [], assignmentTargets: { task: [] }, assignmentEligibility: { task: false } };
     const selected = new Map((policy.grants || []).map(grant => [grant.permission, grant.scope]));
     const grouped = (data.permissions || []).reduce((all, permission) => { const key = permission.split('.')[0]; (all[key] ||= []).push(permission); return all; }, {});
-    const grantRows = Object.entries(grouped).map(([area, permissions]) => `<fieldset class="cc-workspace-layout-list"><legend>${escapeHtml(area)}</legend>${permissions.map(permission => `<label class="cc-workspace-layout-row"><span><input type="checkbox" data-access-permission="${escapeHtml(permission)}" ${selected.has(permission) ? 'checked' : ''}/> ${escapeHtml(accessPermissionLabel(permission))}</span><select data-access-scope="${escapeHtml(permission)}" ${selected.has(permission) ? '' : 'disabled'}>${(data.scopes || []).map(scope => `<option value="${escapeHtml(scope)}" ${(selected.get(permission) || 'self') === scope ? 'selected' : ''}>${escapeHtml(accessScopeLabel(scope))}</option>`).join('')}</select></label>`).join('')}</fieldset>`).join('');
+    const grantRows = Object.entries(grouped).map(([area, permissions]) => `<fieldset class="cc-workspace-layout-list"><legend>${escapeHtml(accessAreaLabel(area))}</legend>${permissions.map(permission => `<label class="cc-workspace-layout-row"><span><input type="checkbox" data-access-permission="${escapeHtml(permission)}" ${selected.has(permission) ? 'checked' : ''}/> ${escapeHtml(accessPermissionLabel(permission))}</span><select data-access-scope="${escapeHtml(permission)}" ${selected.has(permission) ? '' : 'disabled'}>${(data.scopes || []).map(scope => `<option value="${escapeHtml(scope)}" ${(selected.get(permission) || 'self') === scope ? 'selected' : ''}>${escapeHtml(accessScopeLabel(scope))}</option>`).join('')}</select></label>`).join('')}</fieldset>`).join('');
     const targets = new Set(policy.assignmentTargets?.task || []);
     const taskEligible = policy.assignmentEligibility?.task === true;
     const identity = `${account.name || account.username} · ${account.username}`;
