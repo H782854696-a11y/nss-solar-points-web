@@ -91,5 +91,5 @@ test('workspace layout visibility changes only configurable entries and preserve
   assert.match(app, /ccPersonalWorkspaceForm[\s\S]{0,700}state\.workspaceSettings = await PUT[\s\S]{0,300}applyWorkspaceSettings\(\)/);
   assert.match(app, /ccRestoreDepartmentWorkspace[\s\S]{0,700}state\.workspaceSettings = await DELETE[\s\S]{0,300}applyWorkspaceSettings\(\)/);
   assert.match(index, /data-workspace="org"/);
-  assert.match(index, /app\.js\?v=107/);
+  assert.match(index, /app\.js\?v=110/);
 });

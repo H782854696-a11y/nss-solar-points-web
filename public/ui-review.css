@@ -441,6 +441,15 @@
 .app-shell a:focus-visible { outline-color: var(--nav-accent); }
 .app-shell .nav-count { background: var(--danger-ink); }
 .app-shell .nav-count-neutral { background: #333A41; color: var(--nav-text); }
+/* Published-announcement total: it is an informational count, not an alert.
+   Keep it legible against the green selected row as well as neutral/hover rows. */
+.app-shell [data-workspace="announcements"] .nav-count-neutral,
+.app-shell [data-workspace="announcements"].active .nav-count-neutral,
+.app-shell [data-workspace="announcements"]:hover .nav-count-neutral {
+  background: #F8FAFC;
+  color: #17202A;
+  border: 1px solid #C7D1DC;
+}
 .app-shell .user-name { color: #E6EDF3; }
 .app-shell .user-chevron { color: var(--nav-muted); }
 .app-shell .nav-group-system { border-top-color: var(--nav-line); }

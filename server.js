@@ -279,7 +279,10 @@ app.get('/api/auth/me', (req, res) => {
   res.json({
     user: u,
     role: rbac.normalizeRole(u.role),
-    grants: rbac.grantsFor(u.role),
+    // Explicit per-person policy is authoritative when present. role remains
+    // a legacy/audit field only and is never used to widen such an account.
+    grants: rbac.grantsForUser(u),
+    accessState: rbac.accessState(u),
     mustChangePassword: !!u.mustChangePassword,
   });
 });
@@ -1424,7 +1427,7 @@ function workflowApproverIdentity(employeeId, users = readAll('users') || [], em
   if (accounts.length !== 1) return { employee, reason: '关联登录账号不唯一' };
   const user = accounts[0];
   if (user.disabled) return { employee, user, reason: '关联账号已停用' };
-  if (rbac.normalizeRole(user.role) === 'pending_authorization') return { employee, user, reason: '关联账号尚未授权' };
+  if (rbac.accessState(user) !== 'active') return { employee, user, reason: '关联账号尚未授权' };
   return { employee, user, reason: null };
 }
 // A task is addressed to an employee record, then resolved server-side to the
@@ -1440,7 +1443,7 @@ function taskAssigneeIdentity(employeeId, users = readAll('users') || [], employ
   return identity;
 }
 function isAllCompanyTaskAssigner(user) {
-  return rbac.normalizeRole(user?.role) === 'admin';
+  return rbac.hasPermission(user, 'system.role.manage');
 }
 function taskAssigneeCandidate(req, actor, employee, users, employees) {
   const identity = taskAssigneeIdentity(employee.id, users, employees);
@@ -1482,7 +1485,7 @@ function taskAssigneeForRequest(req, actor, rawEmployeeId, legacyUserId, resourc
 // and cannot reveal another workflow. Country remains fail-closed; cross-team
 // assignment is limited to department/store as explicitly approved.
 function explicitWorkflowAccess(instance, user) {
-  if (!instance?.assignedApproverAccess || instance.status !== 'pending_approval' || !user || user.disabled || rbac.normalizeRole(user.role) === 'pending_authorization') return false;
+  if (!instance?.assignedApproverAccess || instance.status !== 'pending_approval' || !user || user.disabled || rbac.accessState(user) !== 'active') return false;
   if (!instance.country || !user.country || instance.country !== user.country) return false;
   const assignments = instance.assignedApproverAccess.steps?.[instance.currentStep] || [];
   // Object records are the new immutable server-generated contract. Do not
@@ -1579,7 +1582,7 @@ app.post('/api/v2/users', (req, res) => {
   const userCountry = region?.countryCode || storeRegion?.countryCode || (PH_ROLES.has(role) ? 'PH' : (b.country || 'CN'));
   // Store/region are prepared account metadata, not permissions. Keeping them
   // lets the later protected role grant validate and apply the intended scope.
-  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, storeId: store?.id || null, regionId: region?.id || store?.regionId || null, employeeId: employee?.id || null, phone: '', createdAt: nowIso(), disabled: false, mustChangePassword: false, country: userCountry };
+  const user = { id: nanoid(), username, password: bcrypt.hashSync(password, 12), name, role, accessPolicy: { version: rbac.ACCESS_POLICY_VERSION, state: 'pending_authorization', grants: [], assignmentTargets: { task: [] }, migratedFromRole: null }, storeId: store?.id || null, regionId: region?.id || store?.regionId || null, employeeId: employee?.id || null, phone: '', createdAt: nowIso(), disabled: false, mustChangePassword: false, country: userCountry };
   users.push(user); writeAll('users', users);
   if (employee) { employee.userId = user.id; employee.name = name; if (!employee.storeId && store) employee.storeId = store.id; if (!employee.regionId) employee.regionId = user.regionId; employee.updatedAt = nowIso(); writeAll('employees', employees); }
   recordControlAudit(req, actor, 'user.create', 'user', user.id, { role, storeId: user.storeId, regionId: user.regionId, employeeId: user.employeeId });
@@ -1597,6 +1600,15 @@ app.put('/api/v2/users/:id/role', (req, res) => {
   const users = readAll('users') || [], target = users.find(x => x.id === req.params.id);
   if (!target) return res.status(404).json({ error: '账号不存在' });
   if (!guard.check(req, res, 'system.user.edit', target)) return;
+  // Fresh accounts carry an empty pending policy so that the official
+  // per-person screen can show their state. Keep this hidden legacy bootstrap
+  // usable for old clients only until a real policy has been granted.
+  const bootstrapPendingPolicy = rbac.hasExplicitAccessPolicy(target)
+    && rbac.accessState(target) !== 'active'
+    && Array.isArray(target.accessPolicy?.grants)
+    && target.accessPolicy.grants.length === 0
+    && target.accessPolicy?.migratedFromRole === null;
+  if (rbac.hasExplicitAccessPolicy(target) && !bootstrapPendingPolicy) return res.status(409).json({ error: '该账号已使用人员级授权，请在工作台授权设置中修改' });
   // This is an initial grant, not a general role-editor. Limiting it to
   // pending accounts keeps existing accounts immutable through this new route.
   if (rbac.normalizeRole(target.role) !== 'pending_authorization') return res.status(409).json({ error: '仅可为待授权账号首次授予角色' });
@@ -1610,11 +1622,80 @@ app.put('/api/v2/users/:id/role', (req, res) => {
   if (role === 'manager' && store?.managerId) return res.status(409).json({ error: '该门店已有店长账号，请先在门店管理中更换或解绑' });
   const PH_ROLES = new Set(['philippines_manager', 'regional_manager', 'manager', 'sales', 'warehouse', 'service']);
   if (PH_ROLES.has(role)) target.country = region?.countryCode || (store?.regionId ? regions.find(x => x.id === store.regionId)?.countryCode : null) || 'PH';
-  target.role = role; target.updatedAt = nowIso();
+  target.role = role;
+  // Hidden compatibility route for existing integrations/tests. Do not create
+  // an explicit policy here: its named task-target list would freeze before
+  // later accounts are created. The deliberate offline migration is the only
+  // bulk conversion path; new UI setup uses /access-policy directly.
+  delete target.accessPolicy;
+  target.updatedAt = nowIso();
   if (role === 'manager' && store) { store.managerId = target.id; store.managerName = target.name; writeAll('stores', stores); }
   writeAll('users', users);
   recordControlAudit(req, actor, 'user.role.grant', 'user', target.id, { previousRole: 'pending_authorization', role, storeId: target.storeId, regionId: target.regionId });
   const { password: _password, ...safe } = target; res.json({ item: safe });
+});
+
+const PERSON_POLICY_GLOBAL_ONLY = new Set([
+  'points.rule.edit', 'points.expiry.scan', 'sync.view', 'sync.config', 'sync.run',
+  'system.user.view', 'system.user.edit', 'system.role.manage', 'system.config.edit', 'system.audit.view',
+  'db.view', 'db.export',
+]);
+
+function normalizePersonAccessPolicy(raw, target, users) {
+  const input = raw && typeof raw === 'object' ? raw : {};
+  const state = input.state === 'active' ? 'active' : input.state === 'pending_authorization' ? 'pending_authorization' : null;
+  if (!state) return { error: '授权状态无效' };
+  const requested = Array.isArray(input.grants) ? input.grants : [];
+  if (requested.length > rbac.PERMISSIONS.length) return { error: '授权项数量无效' };
+  const grants = rbac.cleanAccessGrants(requested);
+  if (grants.length !== requested.length || requested.some(item => !item || !rbac.PERMISSIONS.includes(item.permission) || !rbac.SCOPES.includes(item.scope))) return { error: '授权项或数据范围无效' };
+  for (const grant of grants) {
+    if (PERSON_POLICY_GLOBAL_ONLY.has(grant.permission) && grant.scope !== 'global') return { error: `${grant.permission} 仅可授予全局范围` };
+    if (grant.scope === 'store' && !target.storeId) return { error: '门店范围授权要求账号先关联门店' };
+    if (grant.scope === 'region' && !target.regionId) return { error: '区域范围授权要求账号先关联区域' };
+  }
+  const targetIds = input.assignmentTargets?.task;
+  if (targetIds !== undefined && !Array.isArray(targetIds)) return { error: '任务可指派对象格式无效' };
+  const allowedTargets = Array.from(new Set((targetIds || []).map(id => String(id || '')).filter(Boolean)));
+  if (allowedTargets.length > users.length || allowedTargets.some(id => id === target.id || !users.some(user => user.id === id && !user.disabled))) return { error: '任务可指派对象不存在、已停用或包含自己' };
+  if (input.assignmentEligibility !== undefined && (!input.assignmentEligibility || typeof input.assignmentEligibility !== 'object' || (input.assignmentEligibility.task !== undefined && typeof input.assignmentEligibility.task !== 'boolean'))) return { error: '任务接收资格格式无效' };
+  const taskEligible = input.assignmentEligibility?.task === true;
+  if (taskEligible && (!grants.some(grant => grant.permission === 'task.view') || !grants.some(grant => grant.permission === 'task.close'))) return { error: '可接收任务要求同时授予 task.view 与 task.close' };
+  // Deliberately do not accept assignmentRules from the browser. Dynamic rules
+  // are migration-only, server-generated records; any administrator edit here
+  // becomes an explicit per-person list.
+  return { value: { version: rbac.ACCESS_POLICY_VERSION, state, grants, assignmentTargets: { task: allowedTargets }, assignmentRules: {}, assignmentEligibility: { task: taskEligible }, migratedFromRole: target.role || null } };
+}
+
+// Official personnel-grant API.  It deliberately requires the existing
+// system-role-management capability, rejects self-edits, and keeps at least
+// one active policy administrator.  Browser menu hiding is not its boundary.
+app.get('/api/v2/users/:id/access-policy', (req, res) => {
+  const actor = getSessionUser(req); if (!actor) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.role.manage')) return;
+  const users = readAll('users') || [], target = users.find(user => user.id === req.params.id);
+  if (!target) return res.status(404).json({ error: '账号不存在' });
+  if (!guard.check(req, res, 'system.user.edit', target)) return;
+  const policy = rbac.hasExplicitAccessPolicy(target) ? target.accessPolicy : rbac.buildAccessPolicyFromLegacy(target, users);
+  res.json({ item: { userId: target.id, policy, inheritedLegacyPolicy: !rbac.hasExplicitAccessPolicy(target) }, permissions: rbac.PERMISSIONS, scopes: rbac.SCOPES, candidates: users.filter(user => user.id !== target.id && !user.disabled).map(({ password, accessPolicy, ...safe }) => safe) });
+});
+
+app.put('/api/v2/users/:id/access-policy', (req, res) => {
+  const actor = getSessionUser(req); if (!actor) return res.status(401).json({ error: '未登录' });
+  if (!guard.checkPerm(req, res, 'system.role.manage')) return;
+  const users = readAll('users') || [], target = users.find(user => user.id === req.params.id);
+  if (!target) return res.status(404).json({ error: '账号不存在' });
+  if (!guard.check(req, res, 'system.user.edit', target)) return;
+  if (target.id === actor.id) return res.status(400).json({ error: '不能修改自己的授权；请由另一名管理员操作' });
+  const normalized = normalizePersonAccessPolicy(req.body?.policy, target, users);
+  if (normalized.error) return res.status(400).json({ error: normalized.error });
+  const nextPolicy = normalized.value;
+  const effectiveUsers = users.map(user => user.id === target.id ? { ...user, accessPolicy: nextPolicy } : user);
+  if (!effectiveUsers.some(user => !user.disabled && rbac.accessState(user) === 'active' && rbac.hasPermission(user, 'system.role.manage'))) return res.status(409).json({ error: '不能移除最后一个可管理人员授权的管理员' });
+  target.accessPolicy = nextPolicy; target.updatedAt = nowIso();
+  writeAll('users', users);
+  recordControlAudit(req, actor, 'user.access_policy.update', 'user', target.id, { state: nextPolicy.state, grantCount: nextPolicy.grants.length, taskAssignmentTargetCount: nextPolicy.assignmentTargets.task.length, legacyRole: target.role || null });
+  const { password: _password, ...safe } = target; res.json({ item: safe, policy: nextPolicy });
 });
 app.post('/api/v2/organizations', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
@@ -1799,6 +1880,32 @@ app.post('/api/v2/employees/:id/restore', (req, res) => {
   writeAll('employees', items); recordControlAudit(req, u, 'employee.restore', 'employee', item.id, { employeeCode: item.employeeCode, name: item.name });
   res.json({ item });
 });
+// Permanent employee deletion is deliberately separate from legacy archive.
+// It never touches account, task, workflow, or audit records implicitly.
+app.delete('/api/v2/employees/:id', (req, res) => {
+  const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
+  const items = readAll('employees') || [], item = items.find(x => x.id === req.params.id);
+  if (!item) return res.status(404).json({ error: '员工档案不存在' });
+  if (!guard.check(req, res, 'staff.delete', item)) return;
+  if (u.employeeId === item.id) return res.status(400).json({ error: '不能永久删除当前登录用户关联的员工档案' });
+  if (String(req.body?.confirmEmployeeCode || '') !== String(item.employeeCode || '')) return res.status(400).json({ error: '请准确输入员工编号以确认永久删除' });
+  const users = readAll('users') || [];
+  if (users.some(user => user.employeeId === item.id || user.id === item.userId)) return res.status(409).json({ error: '该员工仍有关联账号；请先由管理员明确处理账号关系' });
+  const personIds = new Set([item.id, item.userId].filter(Boolean));
+  const referencesEmployee = value => {
+    if (!value || typeof value !== 'object') return false;
+    if (Array.isArray(value)) return value.some(referencesEmployee);
+    if (value.kind === 'user' && personIds.has(value.id)) return true;
+    return Object.entries(value).some(([key, entry]) => (/(employeeId|assigneeEmployeeId|assignedEmployeeId|userId|assigneeId|approverUserId)$/i.test(key) && personIds.has(entry)) || referencesEmployee(entry));
+  };
+  if ((readAll('tasks') || []).some(referencesEmployee)) return res.status(409).json({ error: '该员工仍被任务引用，不能永久删除' });
+  if ((readAll('workflowDefinitions') || []).some(referencesEmployee) || (readAll('workflowInstances') || []).some(referencesEmployee) || (readAll('workflowActions') || []).some(referencesEmployee)) return res.status(409).json({ error: '该员工仍被流程定义或历史流程引用，不能永久删除' });
+  items.splice(items.findIndex(x => x.id === item.id), 1);
+  writeAll('employees', items);
+  // Existing audit events intentionally remain immutable; this new event is additive only.
+  recordControlAudit(req, u, 'employee.delete', 'employee', item.id, { employeeCode: item.employeeCode, name: item.name });
+  res.json({ ok: true, id: item.id, deleted: true });
+});
 
 app.get('/api/v2/workflows/types', (req, res) => {
   if (!guard.checkPerm(req, res, 'workflow.view')) return;
@@ -1909,7 +2016,7 @@ app.get('/api/v2/workflows', (req, res) => {
   const u = getSessionUser(req); if (!u) return res.status(401).json({ error: '未登录' });
   // Pending/disabled accounts must never gain the narrow exception. Other
   // named users may receive only their current frozen assignment below.
-  if (u.disabled || rbac.normalizeRole(u.role) === 'pending_authorization') return res.status(403).json({ error: '无权限访问流程' });
+  if (u.disabled || rbac.accessState(u) !== 'active') return res.status(403).json({ error: '无权限访问流程' });
   const status = String(req.query.status || ''), type = String(req.query.type || ''), query = controlCenter.cleanText(req.query.q, 160).toLocaleLowerCase();
   const counts = {}, countsByType = {};
   const visible = (readAll('workflowInstances') || []).filter(x => canReadAssignedWorkflow(req, x, u));
